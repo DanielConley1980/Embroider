@@ -196,10 +196,30 @@
       }, { root: fontList, rootMargin: "120px" })
     : null;
 
+  // dropdown open/close
+  const fontSelect = $("fontSelect"), fontTrigger = $("fontTrigger"),
+        fontPanel = $("fontPanel"), fontCurrent = $("fontCurrent");
+  function openPanel() {
+    fontPanel.hidden = false; fontSelect.classList.add("open");
+    fontTrigger.setAttribute("aria-expanded", "true");
+    fontSearch.value = ""; buildFontRows("");
+    const active = fontList.querySelector(".font-row.active");
+    if (active) active.scrollIntoView({ block: "nearest" });
+    fontSearch.focus();
+  }
+  function closePanel() {
+    fontPanel.hidden = true; fontSelect.classList.remove("open");
+    fontTrigger.setAttribute("aria-expanded", "false");
+  }
+  fontTrigger.addEventListener("click", () => { fontPanel.hidden ? openPanel() : closePanel(); });
+  document.addEventListener("click", (e) => { if (!fontSelect.contains(e.target)) closePanel(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePanel(); });
+
   function selectFont(family) {
     text.family = family;
-    [...fontList.querySelectorAll(".font-row")].forEach((r) => r.classList.toggle("active", r.dataset.fam === family));
-    ensureFont(family).then(render);
+    fontCurrent.textContent = family;
+    ensureFont(family).then(() => { fontCurrent.style.fontFamily = '"' + family + '", sans-serif'; render(); });
+    closePanel();
   }
 
   let FONTS = [];
@@ -414,7 +434,11 @@
       ctx.beginPath(); ctx.moveTo(s[1], s[2]); ctx.lineTo(s[3], s[4]); ctx.stroke();
     };
     if (reduceMotion || steps.length === 0) { steps.forEach(draw); return; }
-    const perFrame = Math.max(60, Math.ceil(steps.length / 60));
+    // Slow, deliberate "watch it stitch": spread the whole path over ~14s
+    // (min 1 stitch/frame), so small designs take a few seconds and large ones
+    // stay bounded.
+    const targetFrames = 14 * 60;
+    const perFrame = Math.max(1, Math.ceil(steps.length / targetFrames));
     let i = 0;
     (function frame() {
       const end = Math.min(steps.length, i + perFrame);
@@ -458,6 +482,9 @@
   }
 
   // ---------------- init ----------------
-  ensureFont(text.family).then(render);  // preload default font
+  ensureFont(text.family).then(() => {
+    $("fontCurrent").style.fontFamily = '"' + text.family + '", sans-serif';
+    render();
+  });
   render();
 })();

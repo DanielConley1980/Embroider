@@ -157,9 +157,23 @@ input[type=color] {
 .inline-chk { display: flex; align-items: center; gap: .5rem; font-size: .86rem; font-weight: 600; white-space: nowrap; }
 .inline-chk input { accent-color: var(--thread); width: 15px; height: 15px; }
 
+.font-select { position: relative; }
+.font-trigger {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+  padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel-2); color: var(--ink); font: inherit; font-size: 1.15rem;
+  line-height: 1.2; cursor: pointer; text-align: left;
+}
+.font-trigger .caret { color: var(--muted); font-size: .8rem; flex: none; }
+.font-select.open .font-trigger { border-color: var(--thread); }
+.font-panel {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow); padding: .5rem; display: flex; flex-direction: column; gap: .5rem;
+}
 .font-list {
-  margin-top: .5rem; max-height: 232px; overflow-y: auto;
-  border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2);
+  max-height: 240px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2);
 }
 .font-row {
   display: flex; align-items: center; justify-content: space-between; gap: .6rem;

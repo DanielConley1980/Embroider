@@ -52,9 +52,17 @@
         <p class="eyebrow mt">Text</p>
         <textarea id="text" placeholder="Type here to add text… (Enter for a new line)"></textarea>
 
-        <label class="field-label">Font <span class="subtle" style="font-weight:400">— stitch-friendly styles, shown in their own type</span></label>
-        <input type="search" id="fontSearch" class="font-input" placeholder="Search fonts…" autocomplete="off">
-        <div class="font-list" id="fontList" role="listbox" aria-label="Fonts"></div>
+        <label class="field-label">Font <span class="subtle" style="font-weight:400">— stitch-friendly styles</span></label>
+        <div class="font-select" id="fontSelect">
+          <button type="button" class="font-trigger" id="fontTrigger" aria-haspopup="listbox" aria-expanded="false">
+            <span id="fontCurrent">Poppins</span>
+            <span class="caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="font-panel" id="fontPanel" hidden>
+            <input type="search" id="fontSearch" class="font-input" placeholder="Search fonts…" autocomplete="off">
+            <div class="font-list" id="fontList" role="listbox" aria-label="Fonts"></div>
+          </div>
+        </div>
 
         <div class="row2">
           <div class="grow">
