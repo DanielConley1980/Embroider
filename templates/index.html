@@ -20,23 +20,65 @@
         </svg>
         <h1>Stitch<span>Forge</span></h1>
       </div>
-      <p class="lede">Drop in a photo and turn it into a file a
-        <strong>computerised embroidery machine</strong> can stitch — Brother,
-        Janome, Tajima and more.</p>
+      <p class="lede">Design with a photo, a shape or <strong>typed text</strong>,
+        then turn it into a file a computerised embroidery machine can stitch.</p>
     </header>
 
     <div class="workspace">
-      <!-- LEFT: source + controls -->
+      <!-- LEFT: design studio -->
       <section class="card">
-        <p class="eyebrow">Source</p>
+        <p class="eyebrow">Design source</p>
         <label class="drop" id="drop" for="photo">
           <input type="file" id="photo" accept="image/*" hidden>
           <img id="thumb" alt="" hidden>
           <div id="dropMsg">
             <strong>Drop a photo</strong>
-            <small>or click to browse — JPG, PNG, WEBP (max 25&nbsp;MB)</small>
+            <small>or click to browse — or start from a shape below</small>
           </div>
         </label>
+        <div class="sample-row" id="samples" aria-label="Starting shapes"></div>
+
+        <p class="eyebrow mt">Background</p>
+        <div class="checks" style="margin-top:0">
+          <label><input type="checkbox" id="removeBg"> Remove background / extract design</label>
+        </div>
+        <div class="ctl" id="tolWrap" hidden>
+          <label for="tol">Tolerance <span class="val" id="tolVal">40</span></label>
+          <input type="range" id="tol" min="10" max="140" step="5" value="40">
+          <p class="subtle">Higher removes more of the background. Works best on
+            plain or solid backgrounds.</p>
+        </div>
+
+        <p class="eyebrow mt">Text</p>
+        <textarea id="text" placeholder="Type here to add text… (Enter for a new line)"></textarea>
+
+        <label class="field-label" for="fontInput">Font
+          <span class="subtle" style="font-weight:400">— type any Google Font name</span>
+        </label>
+        <input type="search" id="fontInput" class="font-input" list="fontlist"
+               placeholder="Search fonts…" value="Fraunces" autocomplete="off">
+        <datalist id="fontlist"></datalist>
+        <p class="font-preview" id="fontPreview">Sample</p>
+
+        <div class="row2">
+          <div class="grow">
+            <label class="field-label" for="fontSize" style="margin-top:0">Size
+              <span class="val" id="sizeVal">28</span></label>
+            <input type="range" id="fontSize" min="8" max="80" step="1" value="28">
+          </div>
+          <div>
+            <label class="field-label" style="margin-top:0">Colour</label>
+            <input type="color" id="textColor" value="#1b2724">
+          </div>
+          <div>
+            <label class="field-label" style="margin-top:0">Weight</label>
+            <div class="seg" id="weightSeg">
+              <button type="button" data-w="400" class="active">Regular</button>
+              <button type="button" data-w="700">Bold</button>
+            </div>
+          </div>
+        </div>
+        <p class="subtle">Drag the text in the hoop to position it.</p>
 
         <p class="eyebrow mt">Your machine</p>
         <div class="machines" id="machines">
@@ -49,7 +91,7 @@
         </div>
         <p class="machine-note" id="machineNote">Exports a <b>.PES</b> file.</p>
 
-        <p class="eyebrow mt">Settings</p>
+        <p class="eyebrow mt">Stitch settings</p>
         <div class="ctl">
           <label for="hoop">Hoop size (longest side) <span class="val" id="hoopVal">100 mm</span></label>
           <input type="range" id="hoop" min="40" max="300" step="10" value="100">
@@ -67,10 +109,8 @@
             <option value="0.25">Very dense — slow, heavy</option>
           </select>
         </div>
-
         <div class="checks">
           <label><input type="checkbox" id="smooth" checked> Smooth photo (reduce noise)</label>
-          <label><input type="checkbox" id="bg" checked> Drop background colour</label>
         </div>
 
         <button class="stitch-btn" id="go" disabled>
@@ -85,11 +125,11 @@
       <section class="stage">
         <div class="hoop-wrap">
           <div class="hoop-inner" id="hoopInner">
-            <img id="preview" alt="Stitch preview" hidden>
+            <canvas id="design" width="640" height="420"></canvas>
             <div class="overlay" id="idle">
-              <div class="big">The hoop is empty</div>
-              <div>Drop a photo, choose your machine, then press
-                <em>Create embroidery file</em>.</div>
+              <div class="big">Start your design</div>
+              <div>Drop a photo, pick a shape, or just type some text —
+                it appears here in the hoop.</div>
             </div>
             <div class="overlay" id="spinner" hidden>
               <div class="spin"></div>
@@ -101,6 +141,9 @@
 
         <div class="card" id="resultCard" hidden>
           <p class="eyebrow">Stitch plan</p>
+          <div class="preview-frame" id="previewFrame" style="text-align:center;margin-bottom:1rem;background:var(--fabric);border:1px solid var(--line);border-radius:12px;padding:.6rem">
+            <img id="preview" alt="Stitch preview" hidden style="max-width:100%">
+          </div>
           <div class="readout">
             <div class="cell"><div class="k">Design size</div><div class="v" id="stSize">—</div></div>
             <div class="cell"><div class="k">Stitches</div><div class="v" id="stCount">—</div></div>
@@ -118,14 +161,14 @@
     </div>
 
     <div class="how">
-      <div class="step"><div class="n">01</div><h3>Read</h3><p>Your photo is fit to the hoop and gently denoised.</p></div>
+      <div class="step"><div class="n">01</div><h3>Design</h3><p>Photo, shape or text — remove the background if you like.</p></div>
       <div class="step"><div class="n">02</div><h3>Reduce</h3><p>Colours are collapsed to a handful of real thread shades.</p></div>
       <div class="step"><div class="n">03</div><h3>Fill</h3><p>Each colour region is filled with back-and-forth stitch rows.</p></div>
       <div class="step"><div class="n">04</div><h3>Write</h3><p>The path is exported to your machine's file format.</p></div>
     </div>
 
     <footer>
-      <span>A raster-fill digitiser — best for logos, silhouettes &amp; bold graphic photos. Always test-stitch on scrap first.</span>
+      <span>A raster-fill digitiser — best for logos, silhouettes, text &amp; bold graphic photos. Always test-stitch on scrap first.</span>
       <span class="mono">PES · DST · EXP · JEF · VP3 · XXX</span>
     </footer>
   </div>

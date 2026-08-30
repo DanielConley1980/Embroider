@@ -1,9 +1,22 @@
-# StitchForge — Photo → Machine Embroidery
+# StitchForge — Photo & Text → Machine Embroidery
 
-Upload a photo in your browser and get back a file a computerised embroidery
-machine can stitch. StitchForge reduces the photo to a handful of thread
-colours, generates a scanline fill for each colour region, and writes real
-machine formats via [`pyembroidery`](https://github.com/EmbroidePy/pyembroidery).
+A little browser design studio that turns a photo, a built-in shape, or **typed
+text** into a file a computerised embroidery machine can stitch. Compose your
+design (optionally removing the background to extract a logo, and adding text in
+any Google Font), and StitchForge reduces it to a handful of thread colours,
+generates a scanline fill for each colour region, and writes real machine
+formats via [`pyembroidery`](https://github.com/EmbroidePy/pyembroidery).
+
+## Design studio
+
+- **Sources** — drop a photo, pick a starting shape (flower, mountain, fox), or
+  start blank for text-only.
+- **Text** — type one or more lines, choose any Google Font (search a bundled
+  list or type a family name), set size / colour / weight, and drag it to
+  position in the hoop. Use it alone or layered over a photo/shape.
+- **Background removal** — a fast, in-browser flood-fill cutout with a tolerance
+  control and a live preview, for extracting a simple logo/design from a plain
+  background.
 
 ## What it produces
 
@@ -36,16 +49,10 @@ pip install -r requirements.txt
 python app.py            # serves on http://localhost:5000  (set PORT=… to change)
 ```
 
-Open the page, drop in a photo, tune the settings, and download.
+Open the page, build your design, tune the settings, and download.
 
-## Try it offline (no install)
-
-`demo/index.html` is a single self-contained page — **double-click it to open in
-any browser, no server or internet required.** It runs the same
-quantise → background-drop → scanline-fill → stitch-preview pipeline client-side
-and animates the design stitching into an embroidery hoop, with live stitch-plan
-stats. It shows the plan only; generating the actual `.PES`/`.DST`/… machine files
-needs the Python app above.
+The live app is deployed on Render; `docs/index.html` is a small redirect to it
+so the GitHub Pages link points at the running app.
 
 ### Settings
 

@@ -118,6 +118,45 @@ header.masthead {
 .drop.has-img { padding: .5rem; border-style: solid; }
 .drop.has-img img { max-height: 180px; border-radius: 8px; display: block; }
 
+/* samples */
+.sample-row { display: flex; gap: .5rem; margin-top: .6rem; }
+.sample-row button {
+  flex: 1; aspect-ratio: 1 / 1; padding: 0; overflow: hidden; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2);
+  transition: border-color .13s, box-shadow .13s;
+}
+.sample-row button:hover { border-color: var(--thread); }
+.sample-row button.active { border-color: var(--thread); box-shadow: 0 0 0 2px color-mix(in srgb, var(--thread) 35%, transparent); }
+.sample-row canvas { width: 100%; height: 100%; display: block; }
+.sample-row .blank { display: flex; align-items: center; justify-content: center; font-family: "IBM Plex Mono", monospace; font-size: .66rem; color: var(--muted); letter-spacing: .04em; }
+
+/* field bits */
+.field-label { display: block; font-size: .82rem; font-weight: 600; margin: 1rem 0 .35rem; }
+.field-label:first-child { margin-top: 0; }
+textarea#text {
+  width: 100%; min-height: 54px; resize: vertical; padding: .55rem .65rem;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2);
+  color: var(--ink); font: inherit; font-size: .92rem;
+}
+.row2 { display: flex; gap: .6rem; align-items: center; margin-top: .7rem; flex-wrap: wrap; }
+.row2 > .grow { flex: 1; min-width: 0; }
+input[type=text].font-input, input[type=search].font-input {
+  width: 100%; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel-2); color: var(--ink); font: inherit; font-size: .88rem;
+}
+input[type=color] {
+  width: 40px; height: 36px; padding: 2px; border: 1px solid var(--line);
+  border-radius: 9px; background: var(--panel-2); cursor: pointer; flex: none;
+}
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.seg button {
+  padding: .45rem .7rem; border: 0; background: var(--panel-2); color: var(--ink);
+  font: inherit; font-size: .82rem; cursor: pointer;
+}
+.seg button.active { background: var(--thread); color: #fff; font-weight: 600; }
+.font-preview { font-size: 1.2rem; margin: .5rem 0 0; color: var(--ink); min-height: 1.4em; }
+.subtle { color: var(--faint); font-size: .76rem; margin: .35rem 0 0; }
+
 /* controls */
 .ctl { margin-top: 1.15rem; }
 .ctl > label {
@@ -174,6 +213,9 @@ select {
   min-height: 320px;
 }
 #preview { display: block; max-width: 100%; height: auto; }
+#design { display: block; max-width: 100%; height: auto; touch-action: none; cursor: default; }
+#design.draggable { cursor: grab; }
+#design.dragging { cursor: grabbing; }
 .overlay {
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: .6rem; text-align: center;
