@@ -139,6 +139,19 @@
       if (y > 0) stack.push(idx - w);
       if (y < h - 1) stack.push(idx + w);
     }
+    // Second pass: clear "trapped" background — pockets of the background
+    // colour fully enclosed by the design, which the border flood-fill can
+    // never reach (e.g. white space in the middle of the logo, or inside
+    // letter holes). Any still-opaque pixel within tolerance of the
+    // reference colour is such a pocket, so drop it too. For embroidery this
+    // is what we want: transparent means no stitching, so the hoop fabric
+    // shows through instead of a stitched-in white patch.
+    for (let idx = 0; idx < w * h; idx++) {
+      const p = idx * 4;
+      if (d[p + 3] === 0) continue;                       // already cleared
+      const dr = d[p] - rr, dg = d[p + 1] - rg, db = d[p + 2] - rb;
+      if (dr * dr + dg * dg + db * db <= tol2) d[p + 3] = 0;
+    }
     const out = document.createElement("canvas"); out.width = w; out.height = h;
     out.getContext("2d").putImageData(img, 0, 0);
     return out;
