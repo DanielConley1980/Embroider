@@ -71,10 +71,20 @@ a stabiliser, and lower the density or colour count if the design feels heavy.
 
 ## Deploying
 
-The dev server keeps jobs in memory for a single process. For real traffic run
-it behind a WSGI server and a shared job store, e.g.:
+### One-click on Render
+
+This repo ships a [`render.yaml`](render.yaml) Blueprint. In the Render
+dashboard: **New + → Blueprint**, point it at this repository, and Render reads
+the Blueprint to build and start the app (`gunicorn app:app`) with a health
+check on `/health`. The free plan works.
+
+### Any WSGI host
 
 ```bash
-pip install gunicorn
-gunicorn -w 2 -b 0.0.0.0:8000 app:app
+pip install -r requirements.txt
+gunicorn app:app --bind 0.0.0.0:8000 --workers 1 --threads 4 --timeout 120
 ```
+
+Jobs are held **in memory per process**, so run a single worker (use threads for
+concurrency, as above). To scale out to multiple workers or instances, move the
+job cache to a shared store (Redis, a database, or object storage).

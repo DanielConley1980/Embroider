@@ -1,0 +1,17 @@
+# Render Blueprint — deploys the full StitchForge Flask app.
+# In the Render dashboard: New +  ->  Blueprint  ->  point at this repo.
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: stitchforge
+    runtime: python
+    plan: free
+    # A single worker with threads keeps the in-memory job cache consistent
+    # (jobs are held in-process; multiple workers would not share them).
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+    buildCommand: pip install -r requirements.txt
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+    healthCheckPath: /health
+    autoDeploy: true
