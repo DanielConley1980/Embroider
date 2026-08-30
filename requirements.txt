@@ -1,0 +1,4 @@
+Flask>=3.0
+pyembroidery>=1.4.30
+Pillow>=10.0
+numpy>=1.24

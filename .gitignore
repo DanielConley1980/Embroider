@@ -1,0 +1,9 @@
+samples/*.dst
+samples/*.pes
+samples/*.exp
+samples/*.jef
+samples/*.vp3
+samples/*.xxx
+samples/preview.png
+__pycache__/
+*.pyc

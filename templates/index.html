@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StitchForge — Photo to Embroidery</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">&#9986;</span>
+      <span>StitchForge</span>
+    </div>
+    <span class="tagline">Photo &rarr; machine embroidery file</span>
+  </header>
+
+  <main class="wrap">
+    <section class="panel controls">
+      <h2>1 &middot; Choose a photo</h2>
+
+      <label id="drop" class="dropzone" for="photo">
+        <input type="file" id="photo" accept="image/*" hidden>
+        <img id="thumb" alt="" hidden>
+        <div id="dropText">
+          <strong>Drop a photo here</strong>
+          <span>or click to browse &mdash; JPG, PNG, WEBP (max 25&nbsp;MB)</span>
+        </div>
+      </label>
+
+      <h2>2 &middot; Your machine</h2>
+      <div class="presets" id="presets">
+        <button type="button" class="preset is-active" data-format="pes"  data-hoop="100">Brother / Babylock</button>
+        <button type="button" class="preset" data-format="jef"  data-hoop="100">Janome</button>
+        <button type="button" class="preset" data-format="vp3"  data-hoop="100">Viking / Pfaff</button>
+        <button type="button" class="preset" data-format="exp"  data-hoop="100">Bernina / Melco</button>
+        <button type="button" class="preset" data-format="xxx"  data-hoop="100">Singer</button>
+        <button type="button" class="preset" data-format="dst"  data-hoop="100">Tajima (universal)</button>
+      </div>
+      <p class="preset-note" id="presetNote">Brother machines use <strong>.PES</strong> files &mdash; selected.</p>
+
+      <h2>3 &middot; Settings</h2>
+
+      <div class="field">
+        <label for="hoop_mm">Hoop size (longest side)</label>
+        <div class="row">
+          <input type="range" id="hoop_mm" min="40" max="300" step="5" value="100">
+          <output id="hoop_out">100 mm</output>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="num_colors">Thread colours</label>
+        <div class="row">
+          <input type="range" id="num_colors" min="2" max="12" step="1" value="6">
+          <output id="colors_out">6</output>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="density">Fill density</label>
+        <div class="row">
+          <select id="density">
+            <option value="0.6">Light &mdash; fast, open fill</option>
+            <option value="0.4" selected>Medium &mdash; balanced</option>
+            <option value="0.3">Dense &mdash; solid coverage</option>
+            <option value="0.25">Very dense &mdash; slow, heavy</option>
+          </select>
+        </div>
+      </div>
+
+      <details class="advanced">
+        <summary>Advanced &middot; output format</summary>
+        <div class="field">
+          <label for="format">Machine format</label>
+          <div class="row">
+            <select id="format">
+              {% for f in formats %}
+              <option value="{{ f.ext }}"{% if f.ext == 'pes' %} selected{% endif %}>
+                .{{ f.ext|upper }} &mdash; {{ f.label }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <p class="note">Set automatically by your machine choice above. Every
+            format is still generated &mdash; you can grab the others after converting.</p>
+        </div>
+      </details>
+
+      <div class="checks">
+        <label><input type="checkbox" id="smooth" checked> Smooth photo (reduce noise)</label>
+        <label><input type="checkbox" id="remove_background" checked> Drop background colour</label>
+      </div>
+
+      <button id="convertBtn" class="primary" disabled>Create embroidery file</button>
+      <p class="note">Coordinates are written in real millimetres. Always stitch a
+        test on scrap fabric first &mdash; photo fills can be dense.</p>
+    </section>
+
+    <section class="panel result">
+      <h2>Result</h2>
+      <div id="placeholder" class="placeholder">
+        Your stitch preview and download links will appear here.
+      </div>
+
+      <div id="output" hidden>
+        <div class="preview-frame">
+          <img id="preview" alt="Stitch preview">
+        </div>
+
+        <dl class="stats">
+          <div><dt>Size</dt><dd id="st_size">&mdash;</dd></div>
+          <div><dt>Stitches</dt><dd id="st_stitches">&mdash;</dd></div>
+          <div><dt>Colours</dt><dd id="st_colors">&mdash;</dd></div>
+        </dl>
+
+        <div class="threads" id="threads"></div>
+
+        <div class="downloads">
+          <a id="download" class="primary" href="#" download>Download file</a>
+          <div class="alt-formats" id="altFormats"></div>
+        </div>
+      </div>
+
+      <div id="spinner" class="spinner" hidden>
+        <div class="dot"></div><span>Planning stitches&hellip;</span>
+      </div>
+      <div id="error" class="error" hidden></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Built with pyembroidery &middot; outputs DST, PES, EXP, JEF, VP3, XXX
+  </footer>
+
+  <script>window.FORMATS = {{ formats|tojson }};</script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
