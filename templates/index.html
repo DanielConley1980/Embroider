@@ -52,13 +52,9 @@
         <p class="eyebrow mt">Text</p>
         <textarea id="text" placeholder="Type here to add text… (Enter for a new line)"></textarea>
 
-        <label class="field-label" for="fontInput">Font
-          <span class="subtle" style="font-weight:400">— type any Google Font name</span>
-        </label>
-        <input type="search" id="fontInput" class="font-input" list="fontlist"
-               placeholder="Search fonts…" value="Fraunces" autocomplete="off">
-        <datalist id="fontlist"></datalist>
-        <p class="font-preview" id="fontPreview">Sample</p>
+        <label class="field-label">Font <span class="subtle" style="font-weight:400">— stitch-friendly styles, shown in their own type</span></label>
+        <input type="search" id="fontSearch" class="font-input" placeholder="Search fonts…" autocomplete="off">
+        <div class="font-list" id="fontList" role="listbox" aria-label="Fonts"></div>
 
         <div class="row2">
           <div class="grow">
@@ -107,6 +103,7 @@
         <div class="ctl">
           <label for="colors">Thread colours <span class="val" id="colorsVal">6</span></label>
           <input type="range" id="colors" min="2" max="12" step="1" value="6">
+          <p class="advice" id="colorAdvice"></p>
         </div>
         <div class="ctl">
           <label for="density" style="margin-bottom:.4rem">Fill density</label>

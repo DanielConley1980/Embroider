@@ -11,7 +11,7 @@
   let baseProcessed = null;  // base after background removal (or null)
   let format = "pes";
   let lastJob = null, availableFormats = [];
-  const text = { value: "", family: "Fraunces", size: 28, color: "#1b2724", weight: 400, x: 0.5, y: 0.5,
+  const text = { value: "", family: "Poppins", size: 28, color: "#1b2724", weight: 400, x: 0.5, y: 0.5,
                  outline: false, outlineColor: "#ffffff", outlineWidth: 12 };
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -156,62 +156,95 @@
     render();
   }
 
-  // ---------------- fonts ----------------
-  fetch("/static/googlefonts.json").then((r) => r.json()).then((list) => {
-    const dl = $("fontlist");
-    list.forEach((f) => {
-      const o = document.createElement("option");
-      o.value = f.n; o.label = f.c;
-      dl.appendChild(o);
-    });
-  }).catch(() => {});
-
+  // ---------------- fonts (scrollable preview picker) ----------------
+  const fontList = $("fontList"), fontSearch = $("fontSearch");
   const loadedFonts = new Set();
-  async function ensureFont(family, weight) {
-    if (!family) return;
-    const key = family + ":" + weight;
-    if (!loadedFonts.has(key)) {
-      loadedFonts.add(key);
-      try {
-        const link = document.createElement("link");
-        link.rel = "stylesheet";
-        link.href = "https://fonts.googleapis.com/css2?family=" +
-          encodeURIComponent(family).replace(/%20/g, "+") + ":wght@" + weight + "&display=swap";
-        document.head.appendChild(link);
-      } catch (e) { /* ignore */ }
-    }
+  function loadFontCss(family) {
+    if (!family || loadedFonts.has(family)) return;
+    loadedFonts.add(family);
+    try {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      // no weight axis -> always resolves; canvas applies synthetic bold if needed
+      link.href = "https://fonts.googleapis.com/css2?family=" +
+        encodeURIComponent(family).replace(/%20/g, "+") + "&display=swap";
+      document.head.appendChild(link);
+    } catch (e) { /* ignore */ }
+  }
+  async function ensureFont(family) {
+    loadFontCss(family);
     try {
       await Promise.race([
-        document.fonts.load(weight + ' 40px "' + family + '"'),
-        new Promise((res) => setTimeout(res, 2500)),
+        document.fonts.load('40px "' + family + '"'),
+        new Promise((res) => setTimeout(res, 2000)),
       ]);
-    } catch (e) { /* fall back silently */ }
+    } catch (e) { /* silent fallback */ }
   }
 
-  async function applyFont() {
-    text.family = $("fontInput").value.trim() || "Fraunces";
-    await ensureFont(text.family, text.weight);
-    $("fontPreview").style.fontFamily = '"' + text.family + '", serif';
-    $("fontPreview").style.fontWeight = text.weight;
-    $("fontPreview").textContent = (text.value.split("\n")[0] || "Sample").slice(0, 24) || "Sample";
-    render();
+  // lazy-load each row's webfont as it scrolls into view
+  const io = ("IntersectionObserver" in window)
+    ? new IntersectionObserver((entries) => {
+        entries.forEach((en) => {
+          if (en.isIntersecting) {
+            const fam = en.target.dataset.fam;
+            loadFontCss(fam);
+            document.fonts.ready.then(() => { en.target.style.fontFamily = '"' + fam + '", sans-serif'; });
+            en.target.style.fontFamily = '"' + fam + '", sans-serif';
+            io.unobserve(en.target);
+          }
+        });
+      }, { root: fontList, rootMargin: "120px" })
+    : null;
+
+  function selectFont(family) {
+    text.family = family;
+    [...fontList.querySelectorAll(".font-row")].forEach((r) => r.classList.toggle("active", r.dataset.fam === family));
+    ensureFont(family).then(render);
   }
-  $("fontInput").addEventListener("change", applyFont);
-  $("fontInput").addEventListener("input", () => { /* wait for change/enter to load */ });
+
+  let FONTS = [];
+  function buildFontRows(filter) {
+    fontList.innerHTML = "";
+    const q = (filter || "").trim().toLowerCase();
+    const shown = FONTS.filter((f) => !q || f.n.toLowerCase().includes(q));
+    if (!shown.length) {
+      const empty = document.createElement("div");
+      empty.className = "font-list-empty";
+      empty.textContent = q ? "No matching fonts." : "Loading fonts…";
+      fontList.appendChild(empty);
+      return;
+    }
+    shown.forEach((f) => {
+      const row = document.createElement("button");
+      row.type = "button"; row.className = "font-row"; row.dataset.fam = f.n;
+      row.setAttribute("role", "option");
+      if (f.n === text.family) row.classList.add("active");
+      const name = document.createElement("span"); name.textContent = f.n;
+      const cat = document.createElement("span"); cat.className = "cat"; cat.textContent = f.c;
+      row.appendChild(name); row.appendChild(cat);
+      row.addEventListener("click", () => selectFont(f.n));
+      fontList.appendChild(row);
+      if (io) io.observe(row); else { loadFontCss(f.n); row.style.fontFamily = '"' + f.n + '", sans-serif'; }
+    });
+  }
+
+  fetch("/static/googlefonts.json").then((r) => r.json()).then((list) => {
+    FONTS = list;
+    buildFontRows("");
+    ensureFont(text.family).then(render);
+  }).catch(() => {});
+
+  fontSearch.addEventListener("input", () => buildFontRows(fontSearch.value));
 
   $("weightSeg").addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return;
     [...$("weightSeg").children].forEach((x) => x.classList.remove("active"));
     b.classList.add("active");
     text.weight = +b.dataset.w;
-    applyFont();
-  });
-
-  $("text").addEventListener("input", () => {
-    text.value = $("text").value;
-    $("fontPreview").textContent = (text.value.split("\n")[0] || "Sample").slice(0, 24) || "Sample";
     render();
   });
+
+  $("text").addEventListener("input", () => { text.value = $("text").value; render(); });
   $("fontSize").addEventListener("input", () => { text.size = +$("fontSize").value; $("sizeVal").textContent = text.size; render(); });
   $("textColor").addEventListener("input", () => { text.color = $("textColor").value; render(); });
   $("textOutline").addEventListener("change", () => {
@@ -265,6 +298,30 @@
     $("idle").hidden = hasContent;
     design.classList.toggle("draggable", !!text.value.trim());
     $("go").disabled = !hasContent;
+    updateColorAdvice();
+  }
+
+  // ---------------- thread-count advice ----------------
+  function colorAdvice() {
+    const hasText = !!text.value.trim();
+    const hasImg = !!baseImage;
+    const bgRemoved = hasImg && $("removeBg").checked;
+    let lo, hi, why;
+    if (!hasImg && hasText) { lo = 2; hi = 3; why = "text stitches cleanest in one or two colours"; }
+    else if (bgRemoved) { lo = 3; hi = 5; why = "an extracted logo usually needs only a few flat colours"; }
+    else if (hasImg) { lo = 6; hi = 8; why = "a full photo keeps its detail with more colours"; }
+    else { lo = 3; hi = 6; why = "a good general range"; }
+    if (hasText && hasImg) hi = Math.min(hi + 1, 12); // text adds ~1 colour
+    return { lo, hi, why };
+  }
+  function updateColorAdvice() {
+    const el = $("colorAdvice"); if (!el) return;
+    const a = colorAdvice();
+    const cur = +$("colors").value;
+    let html = "Suggested: <b>" + a.lo + "–" + a.hi + "</b> — " + a.why + ".";
+    if (cur > a.hi + 1) html += ' <span class="nudge">You’re at ' + cur + "; try lowering it for a cleaner stitch.</span>";
+    else if (cur < a.lo) html += ' <span class="nudge">You’re at ' + cur + "; try raising it for more detail.</span>";
+    el.innerHTML = html;
   }
 
   // drag text
@@ -293,7 +350,7 @@
     if (lastJob) refreshDownloads();
   });
   $("hoop").addEventListener("input", () => $("hoopVal").textContent = $("hoop").value + " mm");
-  $("colors").addEventListener("input", () => $("colorsVal").textContent = $("colors").value);
+  $("colors").addEventListener("input", () => { $("colorsVal").textContent = $("colors").value; updateColorAdvice(); });
 
   // ---------------- convert ----------------
   function exportCanvas() {
@@ -401,6 +458,6 @@
   }
 
   // ---------------- init ----------------
-  applyFont();  // preload default font + preview
+  ensureFont(text.family).then(render);  // preload default font
   render();
 })();

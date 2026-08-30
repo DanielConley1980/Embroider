@@ -156,7 +156,26 @@ input[type=color] {
 .seg button.active { background: var(--thread); color: #fff; font-weight: 600; }
 .inline-chk { display: flex; align-items: center; gap: .5rem; font-size: .86rem; font-weight: 600; white-space: nowrap; }
 .inline-chk input { accent-color: var(--thread); width: 15px; height: 15px; }
-.font-preview { font-size: 1.2rem; margin: .5rem 0 0; color: var(--ink); min-height: 1.4em; }
+
+.font-list {
+  margin-top: .5rem; max-height: 232px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2);
+}
+.font-row {
+  display: flex; align-items: center; justify-content: space-between; gap: .6rem;
+  width: 100%; text-align: left; padding: .5rem .7rem; border: 0; cursor: pointer;
+  background: transparent; color: var(--ink); font-size: 1.4rem; line-height: 1.1;
+  border-bottom: 1px solid var(--line);
+}
+.font-row:last-child { border-bottom: 0; }
+.font-row:hover { background: color-mix(in srgb, var(--thread) 8%, transparent); }
+.font-row.active { background: color-mix(in srgb, var(--thread) 16%, transparent); box-shadow: inset 3px 0 0 var(--thread); }
+.font-row .cat { font-family: "IBM Plex Mono", monospace; font-size: .6rem; text-transform: uppercase; letter-spacing: .1em; color: var(--faint); flex: none; }
+.font-list-empty { padding: .7rem; color: var(--muted); font-size: .82rem; }
+
+.advice { margin: .55rem 0 0; font-size: .8rem; color: var(--muted); }
+.advice b { color: var(--thread); font-family: "IBM Plex Mono", monospace; }
+.advice .nudge { color: var(--needle); }
 .subtle { color: var(--faint); font-size: .76rem; margin: .35rem 0 0; }
 
 /* controls */
