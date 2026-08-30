@@ -306,7 +306,9 @@ def _render_preview(pattern: EmbPattern, width_mm: float, height_mm: float,
     """Draw the actual stitch paths to a PNG so the user sees the plan."""
     W = max(1, int(round(width_mm * scale)))
     H = max(1, int(round(height_mm * scale)))
-    canvas = Image.new("RGB", (W + 8, H + 8), (250, 250, 249))
+    # Transparent background so the stitches sit directly on the hoop fabric in
+    # the UI (whatever colour that is, in light or dark theme).
+    canvas = Image.new("RGBA", (W + 8, H + 8), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
 
     color_idx = 0

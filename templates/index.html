@@ -4,134 +4,131 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StitchForge — Photo to Embroidery</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,900&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="logo" aria-hidden="true">&#9986;</span>
-      <span>StitchForge</span>
-    </div>
-    <span class="tagline">Photo &rarr; machine embroidery file</span>
-  </header>
-
-  <main class="wrap">
-    <section class="panel controls">
-      <h2>1 &middot; Choose a photo</h2>
-
-      <label id="drop" class="dropzone" for="photo">
-        <input type="file" id="photo" accept="image/*" hidden>
-        <img id="thumb" alt="" hidden>
-        <div id="dropText">
-          <strong>Drop a photo here</strong>
-          <span>or click to browse &mdash; JPG, PNG, WEBP (max 25&nbsp;MB)</span>
-        </div>
-      </label>
-
-      <h2>2 &middot; Your machine</h2>
-      <div class="presets" id="presets">
-        <button type="button" class="preset is-active" data-format="pes"  data-hoop="100">Brother / Babylock</button>
-        <button type="button" class="preset" data-format="jef"  data-hoop="100">Janome</button>
-        <button type="button" class="preset" data-format="vp3"  data-hoop="100">Viking / Pfaff</button>
-        <button type="button" class="preset" data-format="exp"  data-hoop="100">Bernina / Melco</button>
-        <button type="button" class="preset" data-format="xxx"  data-hoop="100">Singer</button>
-        <button type="button" class="preset" data-format="dst"  data-hoop="100">Tajima (universal)</button>
+  <div class="shell">
+    <header class="masthead">
+      <div class="wordmark">
+        <svg class="needle" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M3 21c6-2 9-5 14-14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          <circle cx="18.5" cy="5.5" r="2.4" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M4 20l-1 1M6.5 18.2l-.8.8" stroke="var(--needle)" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <h1>Stitch<span>Forge</span></h1>
       </div>
-      <p class="preset-note" id="presetNote">Brother machines use <strong>.PES</strong> files &mdash; selected.</p>
+      <p class="lede">Drop in a photo and turn it into a file a
+        <strong>computerised embroidery machine</strong> can stitch — Brother,
+        Janome, Tajima and more.</p>
+    </header>
 
-      <h2>3 &middot; Settings</h2>
+    <div class="workspace">
+      <!-- LEFT: source + controls -->
+      <section class="card">
+        <p class="eyebrow">Source</p>
+        <label class="drop" id="drop" for="photo">
+          <input type="file" id="photo" accept="image/*" hidden>
+          <img id="thumb" alt="" hidden>
+          <div id="dropMsg">
+            <strong>Drop a photo</strong>
+            <small>or click to browse — JPG, PNG, WEBP (max 25&nbsp;MB)</small>
+          </div>
+        </label>
 
-      <div class="field">
-        <label for="hoop_mm">Hoop size (longest side)</label>
-        <div class="row">
-          <input type="range" id="hoop_mm" min="40" max="300" step="5" value="100">
-          <output id="hoop_out">100 mm</output>
+        <p class="eyebrow mt">Your machine</p>
+        <div class="machines" id="machines">
+          <button type="button" data-fmt="pes" class="active">Brother / Babylock</button>
+          <button type="button" data-fmt="jef">Janome</button>
+          <button type="button" data-fmt="vp3">Viking / Pfaff</button>
+          <button type="button" data-fmt="exp">Bernina / Melco</button>
+          <button type="button" data-fmt="xxx">Singer</button>
+          <button type="button" data-fmt="dst">Tajima (universal)</button>
         </div>
-      </div>
+        <p class="machine-note" id="machineNote">Exports a <b>.PES</b> file.</p>
 
-      <div class="field">
-        <label for="num_colors">Thread colours</label>
-        <div class="row">
-          <input type="range" id="num_colors" min="2" max="12" step="1" value="6">
-          <output id="colors_out">6</output>
+        <p class="eyebrow mt">Settings</p>
+        <div class="ctl">
+          <label for="hoop">Hoop size (longest side) <span class="val" id="hoopVal">100 mm</span></label>
+          <input type="range" id="hoop" min="40" max="300" step="10" value="100">
         </div>
-      </div>
-
-      <div class="field">
-        <label for="density">Fill density</label>
-        <div class="row">
+        <div class="ctl">
+          <label for="colors">Thread colours <span class="val" id="colorsVal">6</span></label>
+          <input type="range" id="colors" min="2" max="12" step="1" value="6">
+        </div>
+        <div class="ctl">
+          <label for="density" style="margin-bottom:.4rem">Fill density</label>
           <select id="density">
-            <option value="0.6">Light &mdash; fast, open fill</option>
-            <option value="0.4" selected>Medium &mdash; balanced</option>
-            <option value="0.3">Dense &mdash; solid coverage</option>
-            <option value="0.25">Very dense &mdash; slow, heavy</option>
+            <option value="0.6">Light — open, fast</option>
+            <option value="0.4" selected>Medium — balanced</option>
+            <option value="0.3">Dense — solid coverage</option>
+            <option value="0.25">Very dense — slow, heavy</option>
           </select>
         </div>
-      </div>
 
-      <details class="advanced">
-        <summary>Advanced &middot; output format</summary>
-        <div class="field">
-          <label for="format">Machine format</label>
-          <div class="row">
-            <select id="format">
-              {% for f in formats %}
-              <option value="{{ f.ext }}"{% if f.ext == 'pes' %} selected{% endif %}>
-                .{{ f.ext|upper }} &mdash; {{ f.label }}
-              </option>
-              {% endfor %}
-            </select>
+        <div class="checks">
+          <label><input type="checkbox" id="smooth" checked> Smooth photo (reduce noise)</label>
+          <label><input type="checkbox" id="bg" checked> Drop background colour</label>
+        </div>
+
+        <button class="stitch-btn" id="go" disabled>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 18c5-1.5 8-4.5 13-13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="18.5" cy="5.5" r="2" stroke="currentColor" stroke-width="1.8"/></svg>
+          Create embroidery file
+        </button>
+        <p class="hint">Coordinates are written in real millimetres. Always stitch a
+          test on scrap fabric first — photo fills can be dense.</p>
+      </section>
+
+      <!-- RIGHT: hoop preview + stats + downloads -->
+      <section class="stage">
+        <div class="hoop-wrap">
+          <div class="hoop-inner" id="hoopInner">
+            <img id="preview" alt="Stitch preview" hidden>
+            <div class="overlay" id="idle">
+              <div class="big">The hoop is empty</div>
+              <div>Drop a photo, choose your machine, then press
+                <em>Create embroidery file</em>.</div>
+            </div>
+            <div class="overlay" id="spinner" hidden>
+              <div class="spin"></div>
+              <div>Planning stitches…</div>
+            </div>
           </div>
-          <p class="note">Set automatically by your machine choice above. Every
-            format is still generated &mdash; you can grab the others after converting.</p>
-        </div>
-      </details>
-
-      <div class="checks">
-        <label><input type="checkbox" id="smooth" checked> Smooth photo (reduce noise)</label>
-        <label><input type="checkbox" id="remove_background" checked> Drop background colour</label>
-      </div>
-
-      <button id="convertBtn" class="primary" disabled>Create embroidery file</button>
-      <p class="note">Coordinates are written in real millimetres. Always stitch a
-        test on scrap fabric first &mdash; photo fills can be dense.</p>
-    </section>
-
-    <section class="panel result">
-      <h2>Result</h2>
-      <div id="placeholder" class="placeholder">
-        Your stitch preview and download links will appear here.
-      </div>
-
-      <div id="output" hidden>
-        <div class="preview-frame">
-          <img id="preview" alt="Stitch preview">
+          <div class="hoop-screw" aria-hidden="true"></div>
         </div>
 
-        <dl class="stats">
-          <div><dt>Size</dt><dd id="st_size">&mdash;</dd></div>
-          <div><dt>Stitches</dt><dd id="st_stitches">&mdash;</dd></div>
-          <div><dt>Colours</dt><dd id="st_colors">&mdash;</dd></div>
-        </dl>
+        <div class="card" id="resultCard" hidden>
+          <p class="eyebrow">Stitch plan</p>
+          <div class="readout">
+            <div class="cell"><div class="k">Design size</div><div class="v" id="stSize">—</div></div>
+            <div class="cell"><div class="k">Stitches</div><div class="v" id="stCount">—</div></div>
+            <div class="cell"><div class="k">Thread colours</div><div class="v" id="stColors">—</div></div>
+          </div>
+          <div class="threads" id="threads"></div>
 
-        <div class="threads" id="threads"></div>
-
-        <div class="downloads">
-          <a id="download" class="primary" href="#" download>Download file</a>
-          <div class="alt-formats" id="altFormats"></div>
+          <a class="dl-main" id="download" href="#" download>Download file</a>
+          <div class="alt-formats"><span class="lbl">also:</span><span id="altFormats"></span></div>
+          <p class="dl-note">Files carry real millimetre coordinates. Copy to a USB
+            stick (or your machine's transfer tool) and load from its USB/memory menu.</p>
         </div>
-      </div>
+        <div class="err" id="error" hidden></div>
+      </section>
+    </div>
 
-      <div id="spinner" class="spinner" hidden>
-        <div class="dot"></div><span>Planning stitches&hellip;</span>
-      </div>
-      <div id="error" class="error" hidden></div>
-    </section>
-  </main>
+    <div class="how">
+      <div class="step"><div class="n">01</div><h3>Read</h3><p>Your photo is fit to the hoop and gently denoised.</p></div>
+      <div class="step"><div class="n">02</div><h3>Reduce</h3><p>Colours are collapsed to a handful of real thread shades.</p></div>
+      <div class="step"><div class="n">03</div><h3>Fill</h3><p>Each colour region is filled with back-and-forth stitch rows.</p></div>
+      <div class="step"><div class="n">04</div><h3>Write</h3><p>The path is exported to your machine's file format.</p></div>
+    </div>
 
-  <footer class="foot">
-    Built with pyembroidery &middot; outputs DST, PES, EXP, JEF, VP3, XXX
-  </footer>
+    <footer>
+      <span>A raster-fill digitiser — best for logos, silhouettes &amp; bold graphic photos. Always test-stitch on scrap first.</span>
+      <span class="mono">PES · DST · EXP · JEF · VP3 · XXX</span>
+    </footer>
+  </div>
 
   <script>window.FORMATS = {{ formats|tojson }};</script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>

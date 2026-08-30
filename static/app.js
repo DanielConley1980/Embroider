@@ -1,90 +1,67 @@
 (function () {
   "use strict";
-
   const $ = (id) => document.getElementById(id);
-  const drop = $("drop");
-  const fileInput = $("photo");
-  const thumb = $("thumb");
-  const dropText = $("dropText");
-  const convertBtn = $("convertBtn");
 
-  let selectedFile = null;
-  let lastJob = null;
-
-  // ---- live slider readouts ----
-  const hoop = $("hoop_mm"), hoopOut = $("hoop_out");
-  const colors = $("num_colors"), colorsOut = $("colors_out");
-  hoop.addEventListener("input", () => hoopOut.textContent = hoop.value + " mm");
-  colors.addEventListener("input", () => colorsOut.textContent = colors.value);
-
-  // ---- machine presets ----
-  const formatSel = $("format");
-  const presetNote = $("presetNote");
+  // format ext -> friendly machine label (from server-provided FORMATS)
   const FMT_LABEL = {};
   (window.FORMATS || []).forEach((f) => { FMT_LABEL[f.ext] = f.label; });
 
-  document.querySelectorAll(".preset").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".preset").forEach((b) => b.classList.remove("is-active"));
-      btn.classList.add("is-active");
-      const fmt = btn.dataset.format;
-      formatSel.value = fmt;
-      if (btn.dataset.hoop) {
-        hoop.value = btn.dataset.hoop;
-        hoopOut.textContent = hoop.value + " mm";
-      }
-      presetNote.innerHTML =
-        btn.textContent.trim() + " machines use <strong>." +
-        fmt.toUpperCase() + "</strong> files &mdash; selected.";
-    });
+  let format = "pes";        // selected download format
+  let lastJob = null;        // current job id (for download links)
+
+  // ---- machine presets ----
+  $("machines").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    [...$("machines").children].forEach((x) => x.classList.remove("active"));
+    b.classList.add("active");
+    format = b.dataset.fmt;
+    $("machineNote").innerHTML = "Exports a <b>." + format.toUpperCase() + "</b> file.";
+    if (lastJob) refreshDownloads();
   });
 
-  // Keep the preset row in sync if someone changes the advanced format manually.
-  formatSel.addEventListener("change", () => {
-    let matched = false;
-    document.querySelectorAll(".preset").forEach((b) => {
-      const on = b.dataset.format === formatSel.value;
-      b.classList.toggle("is-active", on);
-      if (on) matched = true;
-    });
-    presetNote.innerHTML = matched
-      ? presetNote.innerHTML
-      : "Output format: <strong>." + formatSel.value.toUpperCase() + "</strong>.";
-  });
+  // ---- sliders ----
+  const hoop = $("hoop"), hoopVal = $("hoopVal");
+  const colors = $("colors"), colorsVal = $("colorsVal");
+  hoop.addEventListener("input", () => hoopVal.textContent = hoop.value + " mm");
+  colors.addEventListener("input", () => colorsVal.textContent = colors.value);
 
-  // ---- file selection ----
+  // ---- source selection ----
+  const drop = $("drop"), fileInput = $("photo");
+  let selectedFile = null;
+
   function pickFile(file) {
     if (!file || !file.type.startsWith("image/")) return;
     selectedFile = file;
     const url = URL.createObjectURL(file);
-    thumb.src = url;
-    thumb.hidden = false;
-    dropText.hidden = true;
-    convertBtn.disabled = false;
+    $("thumb").src = url;
+    $("thumb").hidden = false;
+    $("dropMsg").hidden = true;
+    drop.classList.add("has-img");
+    $("go").disabled = false;
   }
 
-  // The dropzone is a <label for="photo">, so a click already opens the file
-  // picker natively — do NOT also call fileInput.click() here, or the dialog
-  // opens twice and the second (empty) one discards the first selection.
+  // #drop is a <label for="photo">, so a click already opens the picker natively;
+  // don't call fileInput.click() too or the dialog opens twice and eats the pick.
   fileInput.addEventListener("change", (e) => pickFile(e.target.files[0]));
-
   ["dragenter", "dragover"].forEach((ev) =>
     drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("drag"); }));
   ["dragleave", "drop"].forEach((ev) =>
     drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("drag"); }));
   drop.addEventListener("drop", (e) => {
-    if (e.dataTransfer.files.length) pickFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) pickFile(e.dataTransfer.files[0]);
   });
 
   // ---- convert ----
-  convertBtn.addEventListener("click", async () => {
+  $("go").addEventListener("click", async () => {
     if (!selectedFile) return;
 
     $("error").hidden = true;
-    $("output").hidden = true;
-    $("placeholder").hidden = true;
+    $("resultCard").hidden = true;
+    $("preview").hidden = true;
+    $("idle").hidden = true;
     $("spinner").hidden = false;
-    convertBtn.disabled = true;
+    $("go").disabled = true;
 
     const fd = new FormData();
     fd.append("photo", selectedFile);
@@ -92,7 +69,7 @@
     fd.append("num_colors", colors.value);
     fd.append("row_spacing_mm", $("density").value);
     fd.append("smooth", $("smooth").checked ? "true" : "false");
-    fd.append("remove_background", $("remove_background").checked ? "true" : "false");
+    fd.append("remove_background", $("bg").checked ? "true" : "false");
 
     try {
       const res = await fetch("/convert", { method: "POST", body: fd });
@@ -100,49 +77,61 @@
       if (!res.ok) throw new Error(data.error || "Conversion failed.");
       renderResult(data);
     } catch (err) {
+      $("spinner").hidden = true;
+      $("idle").hidden = false;
       $("error").textContent = err.message;
       $("error").hidden = false;
-      $("placeholder").hidden = false;
     } finally {
-      $("spinner").hidden = true;
-      convertBtn.disabled = false;
+      $("go").disabled = false;
     }
   });
 
   function renderResult(data) {
     lastJob = data.job;
-    $("preview").src = data.preview_url + "?t=" + Date.now();
-    $("st_size").textContent = data.width_mm + " × " + data.height_mm + " mm";
-    $("st_stitches").textContent = data.stitch_count.toLocaleString();
-    $("st_colors").textContent = data.color_count;
+    availableFormats = data.formats.map((f) => f.ext);
+
+    const img = $("preview");
+    img.onload = () => {
+      $("spinner").hidden = true;
+      img.hidden = false;
+    };
+    img.src = data.preview_url + "?t=" + Date.now();
+
+    $("stSize").innerHTML = data.width_mm + " × " + data.height_mm + " <small>mm</small>";
+    $("stCount").textContent = Number(data.stitch_count).toLocaleString();
+    $("stColors").textContent = data.color_count;
 
     const tw = $("threads");
     tw.innerHTML = "";
     data.threads.forEach((t) => {
       const chip = document.createElement("span");
-      chip.className = "chip";
-      chip.innerHTML =
-        '<span class="swatch" style="background:' + t.hex + '"></span>' +
-        t.hex + " · " + t.stitches.toLocaleString() + " st";
+      chip.className = "thread-chip";
+      chip.innerHTML = '<span class="sw" style="background:' + t.hex + '"></span>' +
+        t.hex.toUpperCase() + ' <span class="st">· ' + Number(t.stitches).toLocaleString() + ' st</span>';
       tw.appendChild(chip);
     });
 
-    const chosen = $("format").value;
-    const main = $("download");
-    main.href = "/download/" + data.job + "/" + chosen;
-    main.textContent = "Download ." + chosen.toUpperCase();
+    refreshDownloads();
+    $("resultCard").hidden = false;
+  }
+
+  let availableFormats = [];
+  function refreshDownloads() {
+    if (!lastJob) return;
+    // if the chosen machine's format wasn't generated, fall back to the first available
+    const main = availableFormats.includes(format) ? format : (availableFormats[0] || "pes");
+    const dl = $("download");
+    dl.href = "/download/" + lastJob + "/" + main;
+    dl.textContent = "Download ." + main.toUpperCase();
 
     const alt = $("altFormats");
     alt.innerHTML = "";
-    data.formats.forEach((f) => {
-      if (f.ext === chosen) return;
+    availableFormats.filter((f) => f !== main).forEach((f) => {
       const a = document.createElement("a");
-      a.href = "/download/" + data.job + "/" + f.ext;
-      a.textContent = "." + f.ext.toUpperCase();
-      a.title = f.label;
+      a.href = "/download/" + lastJob + "/" + f;
+      a.textContent = "." + f.toUpperCase();
+      a.title = FMT_LABEL[f] || f.toUpperCase();
       alt.appendChild(a);
     });
-
-    $("output").hidden = false;
   }
 })();
