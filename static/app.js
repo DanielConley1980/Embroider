@@ -11,7 +11,9 @@
   let baseProcessed = null;  // base after background removal (or null)
   let format = "pes";
   let lastJob = null, availableFormats = [];
-  const text = { value: "", family: "Fraunces", size: 28, color: "#1b2724", weight: 400, x: 0.5, y: 0.5 };
+  const text = { value: "", family: "Fraunces", size: 28, color: "#1b2724", weight: 400, x: 0.5, y: 0.5,
+                 outline: false, outlineColor: "#ffffff", outlineWidth: 12 };
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   // ---------------- sample shapes ----------------
   function sample(draw) {
@@ -212,6 +214,13 @@
   });
   $("fontSize").addEventListener("input", () => { text.size = +$("fontSize").value; $("sizeVal").textContent = text.size; render(); });
   $("textColor").addEventListener("input", () => { text.color = $("textColor").value; render(); });
+  $("textOutline").addEventListener("change", () => {
+    text.outline = $("textOutline").checked;
+    $("outlineWidth").disabled = !text.outline;
+    render();
+  });
+  $("outlineColor").addEventListener("input", () => { text.outlineColor = $("outlineColor").value; render(); });
+  $("outlineWidth").addEventListener("input", () => { text.outlineWidth = +$("outlineWidth").value; render(); });
 
   // ---------------- design canvas ----------------
   const design = $("design");
@@ -232,6 +241,12 @@
     const lines = text.value.split("\n");
     const lh = fontPx * 1.16;
     const y0 = text.y * H - (lines.length - 1) * lh / 2;
+    if (text.outline) {
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = text.outlineColor;
+      ctx.lineWidth = Math.max(1, (text.outlineWidth / 100) * fontPx);
+      lines.forEach((ln, i) => ctx.strokeText(ln, text.x * W, y0 + i * lh));
+    }
     lines.forEach((ln, i) => ctx.fillText(ln, text.x * W, y0 + i * lh));
   }
   function render() {
@@ -318,12 +333,43 @@
     }, "image/png");
   });
 
+  let animId = null;
+  function animatePreview(anim) {
+    if (animId) cancelAnimationFrame(animId);
+    const cv = $("preview");
+    const w = anim.w || 8, h = anim.h || 8;
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext("2d");
+    ctx.clearRect(0, 0, w, h);
+    ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.lineWidth = 1.4;
+    // flatten to per-segment line steps in stitch order
+    const steps = [];
+    (anim.segments || []).forEach((seg) => {
+      const hex = seg[0], runs = seg[1];
+      runs.forEach((run) => {
+        for (let i = 2; i < run.length; i += 2) {
+          steps.push([hex, run[i - 2], run[i - 1], run[i], run[i + 1]]);
+        }
+      });
+    });
+    const draw = (s) => {
+      ctx.strokeStyle = s[0];
+      ctx.beginPath(); ctx.moveTo(s[1], s[2]); ctx.lineTo(s[3], s[4]); ctx.stroke();
+    };
+    if (reduceMotion || steps.length === 0) { steps.forEach(draw); return; }
+    const perFrame = Math.max(60, Math.ceil(steps.length / 60));
+    let i = 0;
+    (function frame() {
+      const end = Math.min(steps.length, i + perFrame);
+      for (; i < end; i++) draw(steps[i]);
+      if (i < steps.length) animId = requestAnimationFrame(frame);
+    })();
+  }
+
   function renderResult(data) {
     lastJob = data.job;
     availableFormats = data.formats.map((f) => f.ext);
-    const img = $("preview");
-    img.onload = () => { img.hidden = false; };
-    img.src = data.preview_url + "?t=" + Date.now();
+    animatePreview(data.anim || { segments: [] });
     $("stSize").innerHTML = data.width_mm + " × " + data.height_mm + " <small>mm</small>";
     $("stCount").textContent = Number(data.stitch_count).toLocaleString();
     $("stColors").textContent = data.color_count;

@@ -139,6 +139,11 @@ def convert():
             if k in files
         ],
         "preview_url": f"/preview/{jid}",
+        "anim": {
+            "w": result.anim_w,
+            "h": result.anim_h,
+            "segments": result.anim_segments,
+        },
     })
 
 

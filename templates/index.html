@@ -78,6 +78,14 @@
             </div>
           </div>
         </div>
+        <div class="row2">
+          <label class="inline-chk"><input type="checkbox" id="textOutline"> Outline</label>
+          <input type="color" id="outlineColor" value="#ffffff" aria-label="Outline colour">
+          <div class="grow">
+            <input type="range" id="outlineWidth" min="4" max="30" step="2" value="12"
+                   aria-label="Outline thickness" disabled>
+          </div>
+        </div>
         <p class="subtle">Drag the text in the hoop to position it.</p>
 
         <p class="eyebrow mt">Your machine</p>
@@ -142,7 +150,7 @@
         <div class="card" id="resultCard" hidden>
           <p class="eyebrow">Stitch plan</p>
           <div class="preview-frame" id="previewFrame" style="text-align:center;margin-bottom:1rem;background:var(--fabric);border:1px solid var(--line);border-radius:12px;padding:.6rem">
-            <img id="preview" alt="Stitch preview" hidden style="max-width:100%">
+            <canvas id="preview" style="max-width:100%;height:auto"></canvas>
           </div>
           <div class="readout">
             <div class="cell"><div class="k">Design size</div><div class="v" id="stSize">—</div></div>

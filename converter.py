@@ -89,6 +89,10 @@ class ConvertResult:
     color_count: int
     threads: List[ThreadInfo] = field(default_factory=list)
     preview_png: bytes = b""
+    # Ordered stitch path for the client "watch it stitch" animation.
+    anim_w: int = 0
+    anim_h: int = 0
+    anim_segments: list = field(default_factory=list)  # [[hex, [run, run...]], ...]
 
 
 # --------------------------------------------------------------------------- #
@@ -286,6 +290,7 @@ def convert_image(img: Image.Image, opts: ConvertOptions) -> ConvertResult:
     width_mm = w / px_per_mm
     height_mm = h / px_per_mm
     preview = _render_preview(pattern, width_mm, height_mm, threads)
+    aw, ah, asegs = _preview_paths(pattern, width_mm, height_mm, threads)
 
     return ConvertResult(
         pattern=pattern,
@@ -295,7 +300,70 @@ def convert_image(img: Image.Image, opts: ConvertOptions) -> ConvertResult:
         color_count=len(threads),
         threads=threads,
         preview_png=preview,
+        anim_w=aw,
+        anim_h=ah,
+        anim_segments=asegs,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Ordered stitch path (for the client-side "watch it stitch" animation)
+# --------------------------------------------------------------------------- #
+def _preview_paths(pattern: EmbPattern, width_mm: float, height_mm: float,
+                   threads: List[ThreadInfo], scale: float = 4.0):
+    """Return (w, h, segments) where segments = [[hex, [run, run, ...]], ...] and
+    each run is a flat [x0, y0, x1, y1, ...] polyline in the same pixel space as
+    the preview PNG. Colour-ordered, so replaying it draws the design as stitched."""
+    W = max(1, int(round(width_mm * scale))) + 8
+    H = max(1, int(round(height_mm * scale))) + 8
+
+    def hex_at(i):
+        return threads[i].hex if 0 <= i < len(threads) else "#333333"
+
+    segments = []
+    ci = 0
+    runs = []
+    run = []
+    prev = None
+
+    def flush_run():
+        nonlocal run
+        if len(run) >= 4:            # at least two points
+            runs.append(run)
+        run = []
+
+    def flush_color():
+        nonlocal runs
+        flush_run()
+        segments.append([hex_at(ci), runs])
+        runs = []
+
+    for stitch in pattern.stitches:
+        x, y, cmd = stitch[0], stitch[1], stitch[2]
+        px = int(round(4 + (x / UNITS_PER_MM) * scale))
+        py = int(round(4 + (y / UNITS_PER_MM) * scale))
+        if cmd == COLOR_CHANGE:
+            flush_color()
+            ci += 1
+            prev = None
+        elif cmd in (JUMP, TRIM):
+            flush_run()
+            prev = None
+        elif cmd == STITCH:
+            if prev is None:
+                run = [px, py]
+            else:
+                run.append(px)
+                run.append(py)
+            prev = (px, py)
+        else:
+            flush_run()
+            prev = None
+    flush_color()
+
+    # Drop empty trailing colour buckets but keep alignment with threads.
+    segments = [s for s in segments if s[1]]
+    return W, H, segments
 
 
 # --------------------------------------------------------------------------- #
