@@ -63,7 +63,9 @@
     convertBtn.disabled = false;
   }
 
-  drop.addEventListener("click", () => fileInput.click());
+  // The dropzone is a <label for="photo">, so a click already opens the file
+  // picker natively — do NOT also call fileInput.click() here, or the dialog
+  // opens twice and the second (empty) one discards the first selection.
   fileInput.addEventListener("change", (e) => pickFile(e.target.files[0]));
 
   ["dragenter", "dragover"].forEach((ev) =>
