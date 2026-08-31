@@ -240,6 +240,25 @@ select {
 }
 .ghost-btn:hover { border-color: var(--thread); background: color-mix(in srgb, var(--thread) 8%, var(--panel-2)); }
 
+/* ---- vectorise before / after ---- */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+.cmp-col { display: flex; flex-direction: column; gap: .4rem; min-width: 0; }
+.cmp-label {
+  font-family: "IBM Plex Mono", monospace; font-size: .68rem; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--muted);
+}
+.cmp-frame {
+  border: 1px solid var(--line); border-radius: 10px; padding: .5rem;
+  display: flex; align-items: center; justify-content: center; min-height: 90px;
+  /* checkerboard so a transparent cut-out reads as transparent, not white */
+  background-color: var(--panel-2);
+  background-image:
+    linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%),
+    linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%);
+  background-size: 14px 14px; background-position: 0 0, 7px 7px;
+}
+.cmp-frame canvas { max-width: 100%; height: auto; display: block; }
+
 /* ---- hoop / preview ---- */
 .stage { display: flex; flex-direction: column; gap: 1.1rem; }
 .hoop-wrap {

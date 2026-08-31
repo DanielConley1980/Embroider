@@ -399,6 +399,26 @@
     design.classList.toggle("draggable", !!text.value.trim());
     $("go").disabled = !hasContent;
     updateColorAdvice();
+    renderCompare();
+  }
+
+  // Side-by-side before/after for the vectorise step.
+  function renderCompare() {
+    const card = $("compareCard");
+    const before = baseProcessed || baseImage;
+    if (!$("vectorise").checked || !vectorRaster || !before) { card.hidden = true; return; }
+    card.hidden = false;
+    const draw = (cv, src) => {
+      const maxW = 320;
+      const s = Math.min(1, maxW / src.width);
+      cv.width = Math.max(1, Math.round(src.width * s));
+      cv.height = Math.max(1, Math.round(src.height * s));
+      const ctx = cv.getContext("2d");
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.drawImage(src, 0, 0, cv.width, cv.height);
+    };
+    draw($("cmpBefore"), before);
+    draw($("cmpAfter"), vectorRaster);
   }
 
   // ---------------- thread-count advice ----------------

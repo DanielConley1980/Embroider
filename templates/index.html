@@ -168,6 +168,20 @@
           <div class="hoop-screw" aria-hidden="true"></div>
         </div>
 
+        <div class="card compare-card" id="compareCard" hidden>
+          <p class="eyebrow">Vectorise — before &amp; after</p>
+          <div class="compare">
+            <div class="cmp-col">
+              <span class="cmp-label">Before — extracted</span>
+              <div class="cmp-frame"><canvas id="cmpBefore"></canvas></div>
+            </div>
+            <div class="cmp-col">
+              <span class="cmp-label">After — clean vector</span>
+              <div class="cmp-frame"><canvas id="cmpAfter"></canvas></div>
+            </div>
+          </div>
+        </div>
+
         <div class="card" id="resultCard" hidden>
           <p class="eyebrow">Stitch plan</p>
           <div class="preview-frame" id="previewFrame" style="text-align:center;margin-bottom:1rem;background:var(--fabric);border:1px solid var(--line);border-radius:12px;padding:.6rem">
