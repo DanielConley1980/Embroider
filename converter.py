@@ -53,30 +53,104 @@ WORKING_PX_PER_MM = 5.0
 # --------------------------------------------------------------------------- #
 # Vectorise (raster -> clean SVG)
 # --------------------------------------------------------------------------- #
+# Perceptual separation (CIE76 ΔE in Lab) below which two colours aren't worth a
+# separate thread — the palette auto-stops once seeds get this close together.
+_MIN_LAB_SEP = 12.0
+
+
+def _srgb_to_lab(rgb: np.ndarray) -> np.ndarray:
+    """Convert an Nx3 array of sRGB (0–255) to CIE-Lab (D65), vectorised."""
+    rgb = rgb.astype(np.float64) / 255.0
+    lin = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    m = np.array([[0.4124, 0.3576, 0.1805],
+                  [0.2126, 0.7152, 0.0722],
+                  [0.0193, 0.1192, 0.9505]])
+    xyz = lin @ m.T / np.array([0.95047, 1.0, 1.08883])
+    e, kappa = 216 / 24389, 24389 / 27
+    f = np.where(xyz > e, np.cbrt(xyz), (kappa * xyz + 16) / 116)
+    return np.stack([116 * f[:, 1] - 16,
+                     500 * (f[:, 0] - f[:, 1]),
+                     200 * (f[:, 1] - f[:, 2])], axis=1)
+
+
 def _flatten_palette(img: Image.Image, max_colors: int) -> Image.Image:
-    """Reduce an RGBA image to at most ``max_colors`` solid colours, keeping alpha.
+    """Reduce an RGBA image to its most *contrasting* solid colours, keeping alpha.
 
-    This is the palette-reduce step applied to the vector: without it a photo of a
-    logo carries dozens of near-identical shades (anti-aliasing, JPEG noise,
-    lighting) and each would trace to its own colour — so a single burgundy would
-    become four "threads". Collapsing to a few solid colours means one thread per
-    colour, and no needless colour changes on the machine.
+    A logo photo carries dozens of near-identical shades (anti-aliasing, JPEG
+    noise, lighting), and left alone each traces to its own colour — one burgundy
+    becomes four "threads". We want the opposite of averaging: keep the handful of
+    colours that stand furthest apart (the burgundy, the blue, the yellow…) and
+    snap everything else onto the nearest of them, so colours stay vivid.
 
-    Fully transparent pixels are parked on a sentinel slot so they don't spend a
-    palette entry, then made transparent again; partial edge alpha is preserved.
+    Algorithm — farthest-point (max-min) selection in perceptual Lab space:
+      1. Build candidate colours from the opaque pixels (coarse-binned, counted).
+      2. Seed with the dominant colour, then repeatedly add the candidate that is
+         *most distant* from those already chosen — the most contrasting colour
+         wins each round. Tiny speckle colours are ignored while seeding.
+      3. Stop early once the farthest remaining colour is within _MIN_LAB_SEP of
+         the palette (not worth a thread change), so the count self-limits.
+      4. Map every opaque pixel to its nearest seed (nearest, never averaged).
+
+    Fully transparent pixels are left untouched, so the cut-out and soft edges
+    survive.
     """
     img = img.convert("RGBA")
-    alpha = img.getchannel("A")
-    opaque = alpha.point(lambda v: 255 if v > 0 else 0)
+    arr = np.asarray(img)
+    alpha = arr[:, :, 3]
+    rgb = arr[:, :, :3].astype(np.float32)
+    opaque = alpha > 8
+    if max_colors < 1 or not opaque.any():
+        return img
 
-    # Park transparent pixels on black so they cluster into one slot; give the
-    # visible colours the remaining ``max_colors`` entries.
-    sentinel = Image.new("RGB", img.size, (0, 0, 0))
-    rgb = Image.composite(img.convert("RGB"), sentinel, opaque)
-    quant = rgb.quantize(colors=max_colors + 1, method=Image.MEDIANCUT,
-                         dither=Image.NONE).convert("RGB")
-    quant.putalpha(alpha)
-    return quant
+    pix = rgb[opaque]                                   # Nx3 visible pixels
+
+    # Candidate colours: coarse-bin to ~32 levels/channel, average + count each.
+    q = (pix / 8).astype(np.int64)
+    keys = (q[:, 0] << 20) | (q[:, 1] << 10) | q[:, 2]
+    _, inv, counts = np.unique(keys, return_inverse=True, return_counts=True)
+    cand = np.zeros((counts.size, 3), dtype=np.float64)
+    np.add.at(cand, inv, pix)
+    cand /= counts[:, None]
+    cand_lab = _srgb_to_lab(cand)
+
+    # Colours too rare to be intentional shouldn't be picked as a seed, but a
+    # design with only a few flat colours must still seed — so relax the floor if
+    # it leaves too few candidates.
+    floor = max(1, int(0.002 * pix.shape[0]))
+    eligible = counts >= floor
+    if eligible.sum() < min(max_colors, counts.size):
+        eligible = np.ones_like(counts, dtype=bool)
+
+    # Farthest-first: dominant colour first, then most-distant each round.
+    order = np.argsort(counts)[::-1]
+    first = int(order[eligible[order]][0])
+    chosen = [first]
+    dist = np.linalg.norm(cand_lab - cand_lab[first], axis=1)
+    while len(chosen) < min(max_colors, counts.size):
+        masked = np.where(eligible, dist, -1.0)
+        nxt = int(np.argmax(masked))
+        if masked[nxt] < _MIN_LAB_SEP:      # nothing left worth a new thread
+            break
+        chosen.append(nxt)
+        dist = np.minimum(dist, np.linalg.norm(cand_lab - cand_lab[nxt], axis=1))
+
+    palette_rgb = cand[chosen]
+    palette_lab = cand_lab[chosen]
+
+    # Map each opaque pixel to its nearest seed (streamed over K to bound memory).
+    pix_lab = _srgb_to_lab(pix)
+    best = np.full(pix.shape[0], np.inf)
+    nearest = np.zeros(pix.shape[0], dtype=np.int64)
+    for i, pl in enumerate(palette_lab):
+        d = np.linalg.norm(pix_lab - pl, axis=1)
+        closer = d < best
+        best[closer] = d[closer]
+        nearest[closer] = i
+
+    out = rgb.copy()
+    out[opaque] = palette_rgb[nearest].astype(np.float32)
+    result = np.dstack([out.astype(np.uint8), alpha[:, :, None]])
+    return Image.fromarray(result, "RGBA")
 
 
 def vectorise_png(
