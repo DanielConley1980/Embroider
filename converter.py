@@ -302,21 +302,67 @@ class ConvertResult:
 # --------------------------------------------------------------------------- #
 # Image preparation
 # --------------------------------------------------------------------------- #
-def _prepare_image(img: Image.Image, opts: ConvertOptions):
-    """Orient, scale to the hoop, denoise and return (rgb_array, px_per_mm)."""
-    img = ImageOps.exif_transpose(img).convert("RGB")
+def _prepare_image(img: Image.Image, opts: ConvertOptions, *, keep_alpha: bool = False):
+    """Orient and scale to the hoop. Returns (rgb_array, alpha_array_or_None, px_per_mm).
 
-    # Scale so the longest side equals hoop_mm * WORKING_PX_PER_MM pixels.
+    With ``keep_alpha`` the alpha channel is preserved (transparent = no stitch),
+    used by the fixed-palette path. Otherwise transparency is composited onto white
+    and the photo is denoised, matching the original octree behaviour.
+    """
+    img = ImageOps.exif_transpose(img).convert("RGBA")
     target_long_px = int(round(opts.hoop_mm * WORKING_PX_PER_MM))
-    w, h = img.size
-    scale = target_long_px / float(max(w, h))
-    new_size = (max(1, int(round(w * scale))), max(1, int(round(h * scale))))
-    img = img.resize(new_size, Image.LANCZOS)
 
+    def _scaled(im):
+        w, h = im.size
+        scale = target_long_px / float(max(w, h))
+        return im.resize((max(1, int(round(w * scale))), max(1, int(round(h * scale)))),
+                         Image.LANCZOS)
+
+    if keep_alpha:
+        img = _scaled(img)
+        arr = np.asarray(img, dtype=np.uint8)
+        return arr[:, :, :3].copy(), arr[:, :, 3].copy(), WORKING_PX_PER_MM
+
+    # Composite onto white, then the classic denoise + return RGB only.
+    bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+    img = Image.alpha_composite(bg, img).convert("RGB")
+    img = _scaled(img)
     if opts.smooth:
         img = img.filter(ImageFilter.MedianFilter(size=3))
+    return np.asarray(img, dtype=np.uint8), None, WORKING_PX_PER_MM
 
-    return np.asarray(img, dtype=np.uint8), WORKING_PX_PER_MM
+
+def _quantize_fixed(rgb: np.ndarray, alpha, palette):
+    """Map every pixel to the nearest colour in a caller-supplied palette (Lab).
+
+    This makes the stitch output use the *exact* threads chosen upstream by the
+    reduce step (and manual edits) instead of re-quantising from scratch. Fully
+    transparent pixels become background (no stitch). Returns the same
+    (labels, colors, order, background) shape as :func:`_quantize`.
+    """
+    h, w, _ = rgb.shape
+    pal = np.array(palette, dtype=np.float64)          # Kx3
+    pal_lab = _srgb_to_lab(pal)
+    lab = _srgb_to_lab(rgb.reshape(-1, 3).astype(np.float64))
+
+    best = np.full(lab.shape[0], np.inf)
+    nearest = np.zeros(lab.shape[0], dtype=np.int32)
+    for i, pl in enumerate(pal_lab):
+        d = np.linalg.norm(lab - pl, axis=1)
+        closer = d < best
+        best[closer] = d[closer]
+        nearest[closer] = i
+    labels = nearest.reshape(h, w).astype(np.int32)
+
+    colors = [(int(c[0]), int(c[1]), int(c[2])) for c in pal]
+    background = len(colors)                            # index reserved for "no stitch"
+    colors.append((255, 255, 255))                     # placeholder for that index
+    if alpha is not None:
+        labels[alpha < 128] = background
+
+    used = np.unique(labels)
+    order = [int(i) for i in used if i != background]
+    return labels, colors, order, background
 
 
 def _quantize(rgb: np.ndarray, opts: ConvertOptions):
@@ -436,10 +482,16 @@ def _fill_color(mask: np.ndarray, px_per_mm: float, opts: ConvertOptions):
     return out
 
 
-def convert_image(img: Image.Image, opts: ConvertOptions) -> ConvertResult:
+def convert_image(img: Image.Image, opts: ConvertOptions,
+                  palette=None) -> ConvertResult:
     opts = opts.clamp()
-    rgb, px_per_mm = _prepare_image(img, opts)
-    labels, colors, order, background = _quantize(rgb, opts)
+    use_palette = bool(palette)
+    rgb, alpha, px_per_mm = _prepare_image(img, opts, keep_alpha=use_palette)
+    if use_palette:
+        # Stitch the exact threads the reduce step chose (transparent = no stitch).
+        labels, colors, order, background = _quantize_fixed(rgb, alpha, palette)
+    else:
+        labels, colors, order, background = _quantize(rgb, opts)
     h, w = labels.shape
 
     pattern = EmbPattern()

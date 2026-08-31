@@ -107,8 +107,19 @@ def convert():
         remove_background=request.form.get("remove_background", "true") != "false",
     )
 
+    # Exact threads chosen upstream by the reduce step (and manual edits), so the
+    # stitch output matches the preview instead of being re-quantised.
+    palette = []
+    for tok in request.form.get("palette", "").split(","):
+        tok = tok.strip().lstrip("#")
+        if len(tok) == 6:
+            try:
+                palette.append((int(tok[0:2], 16), int(tok[2:4], 16), int(tok[4:6], 16)))
+            except ValueError:
+                pass
+
     try:
-        result = convert_image(img, opts)
+        result = convert_image(img, opts, palette=palette or None)
     except Exception as exc:  # pragma: no cover - defensive
         return jsonify({"error": f"Conversion failed: {exc}"}), 500
 

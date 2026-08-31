@@ -677,11 +677,22 @@
   $("colors").addEventListener("input", () => { colorsUserSet = true; $("colorsVal").textContent = $("colors").value; updateColorAdvice(); refreshProcessed(); });
 
   // ---------------- convert ----------------
-  function exportCanvas() {
+  // The exact thread colours to stitch: the live reduce palette (non-removed)
+  // plus any text colours, so the machine file matches the preview.
+  function stitchPalette() {
+    const set = [];
+    const push = (hex) => { const h = (hex || "").toLowerCase(); if (h && !set.includes(h)) set.push(h); };
+    if (baseImage) palette.filter((p) => !p.deleted).forEach((p) => push(p.out));
+    if (text.value.trim()) { push(text.color); if (text.outline) push(text.outlineColor); }
+    return set;
+  }
+  function exportCanvas(pal) {
     const { W, H } = designDims();
     const out = document.createElement("canvas"); out.width = W; out.height = H;
     const ctx = out.getContext("2d");
-    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H); // flatten transparency onto white
+    // With a fixed palette we keep transparency (removed threads = no stitch);
+    // without one, fall back to flattening onto white as before.
+    if (!pal.length) { ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H); }
     const src = vectorRaster || editedRaster || reducedRaster || baseProcessed || baseImage;
     if (src) ctx.drawImage(src, 0, 0, W, H);
     drawText(ctx, W, H);
@@ -693,7 +704,8 @@
     $("error").hidden = true; $("resultCard").hidden = true;
     $("spinner").hidden = false; $("go").disabled = true;
 
-    exportCanvas().toBlob(async (blob) => {
+    const pal = stitchPalette();
+    exportCanvas(pal).toBlob(async (blob) => {
       const fd = new FormData();
       fd.append("photo", blob, "design.png");
       fd.append("hoop_mm", $("hoop").value);
@@ -701,6 +713,7 @@
       fd.append("row_spacing_mm", $("density").value);
       fd.append("smooth", $("smooth").checked ? "true" : "false");
       fd.append("remove_background", "true");
+      if (pal.length) fd.append("palette", pal.join(","));
       try {
         const res = await fetch("/convert", { method: "POST", body: fd });
         const data = await res.json();
