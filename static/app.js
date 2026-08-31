@@ -9,7 +9,10 @@
   // ---------------- state ----------------
   let baseImage = null;      // source canvas (photo or sample); null = text-only
   let baseProcessed = null;  // base after background removal (or null)
-  let reducedRaster = null;  // palette-reduced raster (core step; or null)
+  let reducedRaster = null;  // palette-reduced raster from the server (or null)
+  let editedRaster = null;   // reducedRaster after manual palette edits (or null)
+  let palette = [];          // [{src, out, deleted}] editable thread list
+  let selectedPal = -1;      // index of the swatch being edited (-1 = none)
   let vectorSvg = null;      // last vectorised SVG text (for download)
   let vectorRaster = null;   // canvas rasterised from the SVG (preview + export)
   let vectorSeq = 0;         // race guard: only the newest vectorise wins
@@ -197,19 +200,139 @@
     $("reduceStrengthVal").textContent = v <= 20 ? "Sensitive" : v <= 38 ? "Balanced" : "Aggressive";
   }
 
-  // Live palette swatches + thread count for the reduce step.
-  function updatePaletteSwatches(colors) {
-    const el = $("palette"); if (el) {
+  // ---- editable thread palette ----
+  const hexToRgb = (h) => { const n = parseInt(h.slice(1), 16); return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 }; };
+  const toHex6 = (h) => "#" + [hexToRgb(h).r, hexToRgb(h).g, hexToRgb(h).b].map((v) => v.toString(16).padStart(2, "0")).join("");
+
+  // Adopt a fresh server palette, discarding any manual edits (the colours changed).
+  function setPalette(colors) {
+    palette = (colors || []).map((h) => ({ src: h, out: h, deleted: false }));
+    selectedPal = -1; editedRaster = null;
+    renderPalette(); $("palEditor").hidden = true;
+  }
+
+  function renderPalette() {
+    const el = $("palette");
+    if (el) {
       el.innerHTML = "";
-      colors.forEach((hex) => {
-        const sw = document.createElement("span");
-        sw.className = "pal-sw"; sw.style.background = hex; sw.title = hex;
-        el.appendChild(sw);
+      palette.forEach((p, i) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "pal-sw" + (p.deleted ? " deleted" : "") + (i === selectedPal ? " sel" : "");
+        b.style.background = p.deleted ? "transparent" : p.out;
+        b.title = p.deleted ? "Removed — click to edit/restore" : p.out + " — click to edit";
+        b.addEventListener("click", () => selectPalette(i));
+        el.appendChild(b);
       });
     }
     const cnt = $("reduceCount");
-    if (cnt) cnt.textContent = colors.length ? (colors.length + " thread" + (colors.length === 1 ? "" : "s")) : "";
+    if (cnt) {
+      const live = new Set(palette.filter((p) => !p.deleted).map((p) => p.out.toLowerCase()));
+      cnt.textContent = palette.length ? (live.size ? live.size + " thread" + (live.size === 1 ? "" : "s") : "all removed") : "";
+    }
   }
+
+  function selectPalette(i) { selectedPal = i; renderPalette(); openPalEditor(); }
+
+  function openPalEditor() {
+    const p = palette[selectedPal];
+    const ed = $("palEditor");
+    if (!p) { ed.hidden = true; return; }
+    ed.hidden = false;
+    $("palEditSw").style.background = p.deleted ? "transparent" : p.out;
+    $("palEditColor").value = toHex6(p.out);
+    $("palEditDelete").textContent = p.deleted ? "Restore to plan" : "Remove from plan";
+    const m = $("palMerge"); m.innerHTML = "";
+    palette.forEach((q, j) => {
+      if (j === selectedPal || q.deleted) return;
+      const s = document.createElement("button");
+      s.type = "button"; s.className = "pal-sw"; s.style.background = q.out;
+      s.title = "Merge into " + q.out;
+      s.addEventListener("click", () => { p.out = q.out; p.deleted = false; commitPaletteEdit(); });
+      m.appendChild(s);
+    });
+    $("palMergeRow").hidden = m.children.length === 0;
+  }
+
+  // Rebuild the edited raster from the reduced one by recolouring / dropping the
+  // pixels of each palette colour according to the manual edits.
+  function buildEditedRaster() {
+    if (!reducedRaster) { editedRaster = null; return; }
+    const dirty = palette.some((p) => p.deleted || p.out.toLowerCase() !== p.src.toLowerCase());
+    if (!dirty) { editedRaster = null; return; }
+    const w = reducedRaster.width, h = reducedRaster.height;
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const ctx = c.getContext("2d"); ctx.drawImage(reducedRaster, 0, 0);
+    const im = ctx.getImageData(0, 0, w, h), d = im.data;
+    const map = new Map();
+    palette.forEach((p) => {
+      const s = hexToRgb(p.src), o = hexToRgb(p.out);
+      map.set((s.r << 16) | (s.g << 8) | s.b, { del: p.deleted, r: o.r, g: o.g, b: o.b });
+    });
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] === 0) continue;
+      const m = map.get((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]);
+      if (!m) continue;
+      if (m.del) { d[i + 3] = 0; }
+      else { d[i] = m.r; d[i + 1] = m.g; d[i + 2] = m.b; }
+    }
+    ctx.putImageData(im, 0, 0);
+    editedRaster = c;
+  }
+
+  // Apply an edit: rebuild the raster, refresh UI, and re-trace if vectorising.
+  function commitPaletteEdit() {
+    renderPalette(); openPalEditor(); buildEditedRaster();
+    if ($("vectorise").checked) { vectorRaster = null; render(); revectoriseEdited(); }
+    else render();
+  }
+
+  // Re-trace the edited raster (no re-reduce) so the vector reflects manual edits.
+  function revectoriseEdited() {
+    const source = editedRaster || reducedRaster;
+    if (!source) return;
+    const seq = ++vectorSeq;
+    $("vecStatus").textContent = "Smoothing…";
+    source.toBlob((blob) => {
+      if (!blob) return;
+      const fd = new FormData();
+      fd.append("photo", blob, "design.png");
+      fd.append("max_colors", "0");          // keep the edited palette; just smooth
+      fd.append("vectorise", "true");
+      fd.append("filter_speckle", $("vecDetail").value);
+      fetch("/process", { method: "POST", body: fd })
+        .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => {
+          if (seq !== vectorSeq || !ok || !d.svg) return;
+          vectorSvg = d.svg;
+          const img = new Image();
+          const url = URL.createObjectURL(new Blob([d.svg], { type: "image/svg+xml" }));
+          img.onload = () => {
+            URL.revokeObjectURL(url);
+            if (seq !== vectorSeq) return;
+            const c = document.createElement("canvas");
+            c.width = img.naturalWidth || source.width; c.height = img.naturalHeight || source.height;
+            c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+            vectorRaster = c;
+            $("vecStatus").textContent = "Smoothed into vectors.";
+            $("vecActions").hidden = false;
+            render();
+          };
+          img.onerror = () => { URL.revokeObjectURL(url); };
+          img.src = url;
+        })
+        .catch(() => {});
+    }, "image/png");
+  }
+
+  $("palEditColor").addEventListener("input", () => {
+    const p = palette[selectedPal]; if (!p) return;
+    p.out = $("palEditColor").value; p.deleted = false; commitPaletteEdit();
+  });
+  $("palEditDelete").addEventListener("click", () => {
+    const p = palette[selectedPal]; if (!p) return;
+    p.deleted = !p.deleted; commitPaletteEdit();
+  });
 
   // Forget the auto-detected palette when the source image changes, so the next
   // reduce re-suggests a thread count for the new design.
@@ -220,11 +343,11 @@
   function refreshProcessed() {
     const source = baseProcessed || baseImage;
     if (!source) {
-      reducedRaster = null; vectorRaster = null; vectorSvg = null; vectorSuggested = null;
+      reducedRaster = null; editedRaster = null; vectorRaster = null; vectorSvg = null; vectorSuggested = null;
       vectorSeq++;
       $("vecActions").hidden = true; $("vecStatus").textContent = "";
       $("reduceStatus").textContent = "";
-      updatePaletteSwatches([]); updateColorAdvice();
+      setPalette([]); updateColorAdvice();
       render();
       return;
     }
@@ -259,7 +382,7 @@
               if (+slider.value !== want) { slider.value = want; $("colorsVal").textContent = want; }
               if (want > sent) { updateColorAdvice(); refreshProcessed(); return; }
             }
-            updatePaletteSwatches(d.colors || []);
+            setPalette(d.colors || []);
             updateColorAdvice();
             $("reduceStatus").textContent = "";
 
@@ -457,7 +580,7 @@
     design.width = W; design.height = H;
     const ctx = design.getContext("2d");
     ctx.clearRect(0, 0, W, H);
-    const src = vectorRaster || reducedRaster || baseProcessed || baseImage;
+    const src = vectorRaster || editedRaster || reducedRaster || baseProcessed || baseImage;
     if (src) {
       ctx.drawImage(src, 0, 0, W, H);
     } else {
@@ -476,7 +599,7 @@
   function renderCompare() {
     const card = $("compareCard");
     const before = baseProcessed || baseImage;
-    const after = vectorRaster || reducedRaster;
+    const after = vectorRaster || editedRaster || reducedRaster;
     if (!before || !after) { card.hidden = true; return; }
     card.hidden = false;
     const draw = (cv, src) => {
@@ -559,7 +682,7 @@
     const out = document.createElement("canvas"); out.width = W; out.height = H;
     const ctx = out.getContext("2d");
     ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H); // flatten transparency onto white
-    const src = vectorRaster || reducedRaster || baseProcessed || baseImage;
+    const src = vectorRaster || editedRaster || reducedRaster || baseProcessed || baseImage;
     if (src) ctx.drawImage(src, 0, 0, W, H);
     drawText(ctx, W, H);
     return out;

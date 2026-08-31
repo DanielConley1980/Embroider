@@ -59,8 +59,21 @@
           <input type="range" id="reduceStrength" min="12" max="60" step="2" value="30">
           <p class="subtle">Lower keeps subtle shade differences; higher suppresses
             near-identical colours and merges them into one thread.</p>
-          <div class="palette" id="palette" aria-hidden="true"></div>
+          <div class="palette" id="palette"></div>
           <p class="advice"><span id="reduceCount"></span> <span id="reduceStatus" aria-live="polite"></span></p>
+          <p class="subtle" id="paletteHint" style="margin-top:.2rem">Click a thread to recolour it, remove it, or merge it into another.</p>
+          <div class="pal-editor" id="palEditor" hidden>
+            <div class="pal-editor-row">
+              <span class="pal-sw" id="palEditSw" aria-hidden="true"></span>
+              <label class="pal-editor-lbl" for="palEditColor">Colour</label>
+              <input type="color" id="palEditColor" aria-label="Change thread colour">
+              <button type="button" class="ghost-btn" id="palEditDelete">Remove from plan</button>
+            </div>
+            <div class="pal-merge" id="palMergeRow" hidden>
+              <span class="pal-merge-lbl">Merge into:</span>
+              <div class="pal-merge-swatches" id="palMerge"></div>
+            </div>
+          </div>
         </div>
 
         <p class="eyebrow mt">Vectorise</p>
