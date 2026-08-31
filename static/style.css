@@ -309,7 +309,7 @@ select {
 .err { color: #b3352b; background: color-mix(in srgb, #b3352b 8%, var(--panel)); border: 1px solid color-mix(in srgb, #b3352b 30%, var(--panel)); border-radius: 8px; padding: .7rem .9rem; margin-top: 1rem; font-size: .86rem; }
 
 /* how it works */
-.how { margin-top: 1.6rem; display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.how { margin-top: 1.6rem; display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
 @media (max-width: 720px) { .how { grid-template-columns: repeat(2, 1fr); } }
 .how .step { background: var(--panel); padding: 1.1rem 1.15rem; }
 .how .n { font-family: "IBM Plex Mono", monospace; font-size: .72rem; color: var(--thread); font-weight: 600; }
