@@ -13,6 +13,8 @@
   let vectorRaster = null;   // canvas rasterised from the SVG (preview + export)
   let vectorSeq = 0;         // race guard: only the newest vectorise wins
   let vectorTimer = null;    // debounce handle for the vectorise fetch
+  let vectorSuggested = null; // natural distinct-colour count detected for this image
+  let colorsUserSet = false;  // has the user manually chosen the thread count?
   let format = "pes";
   let lastJob = null, availableFormats = [];
   const text = { value: "", family: "Poppins", size: 28, color: "#1b2724", weight: 400, x: 0.5, y: 0.5,
@@ -72,6 +74,7 @@
       btn.classList.add("active");
       clearThumb();
       baseImage = canvasOrNull;
+      resetPaletteAdvice();
       updateBase();
     });
     samplesBox.appendChild(btn);
@@ -99,6 +102,7 @@
       baseImage = c;
       $("thumb").src = url; $("thumb").hidden = false; $("dropMsg").hidden = true; drop.classList.add("has-img");
       [...samplesBox.children].forEach((x) => x.classList.remove("active"));
+      resetPaletteAdvice();
       updateBase();
     };
     img.src = url;
@@ -186,15 +190,20 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 
+  // Forget the auto-detected palette when the source image changes, so the next
+  // vectorise re-suggests a thread count for the new design.
+  function resetPaletteAdvice() { vectorSuggested = null; colorsUserSet = false; }
+
   function updateVector() {
     const on = $("vectorise").checked;
     const source = baseProcessed || baseImage;
     // Off, or nothing to trace: drop any vector state and show the plain base.
     if (!on || !source) {
-      vectorSvg = null; vectorRaster = null;
+      vectorSvg = null; vectorRaster = null; vectorSuggested = null;
       vectorSeq++;                       // cancel any in-flight result
       $("vecActions").hidden = true;
       $("vecStatus").textContent = "";
+      updateColorAdvice();
       render();
       return;
     }
@@ -205,15 +214,27 @@
     vectorTimer = setTimeout(() => {
       source.toBlob((blob) => {
         if (!blob) { if (seq === vectorSeq) $("vecStatus").textContent = "Vectorise failed."; return; }
+        const sent = +$("colors").value;
         const fd = new FormData();
         fd.append("photo", blob, "design.png");
         fd.append("filter_speckle", $("vecDetail").value);
-        fd.append("max_colors", $("colors").value);   // reduce to the thread-colour count
+        fd.append("max_colors", sent);   // reduce to the thread-colour count
         fetch("/vectorise", { method: "POST", body: fd })
           .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
           .then(({ ok, d }) => {
             if (seq !== vectorSeq) return;         // superseded by a newer run
             if (!ok) throw new Error(d.error || "Vectorise failed.");
+            // The trace also tells us the image's natural distinct-colour count.
+            // Adopt it as the thread-count default (unless the user set one), and
+            // re-trace if we'd under-asked so the fuller palette actually renders.
+            vectorSuggested = (d.suggested > 0) ? d.suggested : null;
+            if (vectorSuggested && !colorsUserSet) {
+              const slider = $("colors");
+              const want = clamp(vectorSuggested, +slider.min, +slider.max);
+              if (+slider.value !== want) { slider.value = want; $("colorsVal").textContent = want; }
+              if (want > sent) { updateColorAdvice(); updateVector(); return; }
+            }
+            updateColorAdvice();
             vectorSvg = d.svg;
             const img = new Image();
             const url = URL.createObjectURL(new Blob([d.svg], { type: "image/svg+xml" }));
@@ -437,8 +458,18 @@
   }
   function updateColorAdvice() {
     const el = $("colorAdvice"); if (!el) return;
-    const a = colorAdvice();
     const cur = +$("colors").value;
+    // When we've vectorised, we know the image's actual distinct-colour count —
+    // that's the most appropriate thread count, so lead with it.
+    if ($("vectorise").checked && vectorSuggested) {
+      const n = vectorSuggested;
+      let html = "Best for this image: <b>" + n + "</b> thread colour" + (n === 1 ? "" : "s") +
+        " — the distinct colours it actually contains.";
+      if (cur !== n) html += ' <span class="nudge">You’re at ' + cur + "; " + n + " matches this design.</span>";
+      el.innerHTML = html;
+      return;
+    }
+    const a = colorAdvice();
     let html = "Suggested: <b>" + a.lo + "–" + a.hi + "</b> — " + a.why + ".";
     if (cur > a.hi + 1) html += ' <span class="nudge">You’re at ' + cur + "; try lowering it for a cleaner stitch.</span>";
     else if (cur < a.lo) html += ' <span class="nudge">You’re at ' + cur + "; try raising it for more detail.</span>";
@@ -471,7 +502,7 @@
     if (lastJob) refreshDownloads();
   });
   $("hoop").addEventListener("input", () => $("hoopVal").textContent = $("hoop").value + " mm");
-  $("colors").addEventListener("input", () => { $("colorsVal").textContent = $("colors").value; updateColorAdvice(); updateVector(); });
+  $("colors").addEventListener("input", () => { colorsUserSet = true; $("colorsVal").textContent = $("colors").value; updateColorAdvice(); updateVector(); });
 
   // ---------------- convert ----------------
   function exportCanvas() {

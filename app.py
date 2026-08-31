@@ -172,7 +172,7 @@ def vectorise():
             return default
 
     try:
-        svg = vectorise_png(
+        svg, meta = vectorise_png(
             raw,
             filter_speckle=num("filter_speckle", 4, int),
             color_precision=num("color_precision", 6, int),
@@ -181,7 +181,7 @@ def vectorise():
     except Exception as exc:  # pragma: no cover - defensive
         return jsonify({"error": f"Vectorise failed: {exc}"}), 500
 
-    return jsonify({"svg": svg})
+    return jsonify({"svg": svg, **meta})
 
 
 @app.route("/preview/<job>")

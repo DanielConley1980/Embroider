@@ -57,6 +57,10 @@ WORKING_PX_PER_MM = 5.0
 # separate thread — the palette auto-stops once seeds get this close together.
 _MIN_LAB_SEP = 12.0
 
+# Most contrasting colours we'll ever propose for one design (matches the UI's
+# thread-count cap). The palette search runs up to here, then auto-stops.
+_PALETTE_CEILING = 12
+
 
 def _srgb_to_lab(rgb: np.ndarray) -> np.ndarray:
     """Convert an Nx3 array of sRGB (0–255) to CIE-Lab (D65), vectorised."""
@@ -100,7 +104,7 @@ def _flatten_palette(img: Image.Image, max_colors: int) -> Image.Image:
     rgb = arr[:, :, :3].astype(np.float32)
     opaque = alpha > 8
     if max_colors < 1 or not opaque.any():
-        return img
+        return img, {"suggested": 0, "used": 0, "colors": []}
 
     pix = rgb[opaque]                                   # Nx3 visible pixels
 
@@ -118,15 +122,18 @@ def _flatten_palette(img: Image.Image, max_colors: int) -> Image.Image:
     # it leaves too few candidates.
     floor = max(1, int(0.002 * pix.shape[0]))
     eligible = counts >= floor
-    if eligible.sum() < min(max_colors, counts.size):
+    if eligible.sum() < min(_PALETTE_CEILING, counts.size):
         eligible = np.ones_like(counts, dtype=bool)
 
-    # Farthest-first: dominant colour first, then most-distant each round.
+    # Farthest-first: dominant colour first, then most-distant each round. Run all
+    # the way up to the ceiling; because farthest-first is prefix-optimal, the
+    # ordered seeds double as the answer for *any* smaller count. The auto-stop
+    # gives the "natural" number of distinct colours in the image (the suggestion).
     order = np.argsort(counts)[::-1]
     first = int(order[eligible[order]][0])
     chosen = [first]
     dist = np.linalg.norm(cand_lab - cand_lab[first], axis=1)
-    while len(chosen) < min(max_colors, counts.size):
+    while len(chosen) < min(_PALETTE_CEILING, counts.size):
         masked = np.where(eligible, dist, -1.0)
         nxt = int(np.argmax(masked))
         if masked[nxt] < _MIN_LAB_SEP:      # nothing left worth a new thread
@@ -134,8 +141,11 @@ def _flatten_palette(img: Image.Image, max_colors: int) -> Image.Image:
         chosen.append(nxt)
         dist = np.minimum(dist, np.linalg.norm(cand_lab - cand_lab[nxt], axis=1))
 
-    palette_rgb = cand[chosen]
-    palette_lab = cand_lab[chosen]
+    suggested = len(chosen)                  # natural distinct-colour count
+    used = min(max_colors, suggested)
+    seeds = chosen[:used]
+    palette_rgb = cand[seeds]
+    palette_lab = cand_lab[seeds]
 
     # Map each opaque pixel to its nearest seed (streamed over K to bound memory).
     pix_lab = _srgb_to_lab(pix)
@@ -150,7 +160,9 @@ def _flatten_palette(img: Image.Image, max_colors: int) -> Image.Image:
     out = rgb.copy()
     out[opaque] = palette_rgb[nearest].astype(np.float32)
     result = np.dstack([out.astype(np.uint8), alpha[:, :, None]])
-    return Image.fromarray(result, "RGBA")
+    hexes = ["#%02X%02X%02X" % tuple(int(v) for v in c) for c in palette_rgb]
+    meta = {"suggested": suggested, "used": used, "colors": hexes}
+    return Image.fromarray(result, "RGBA"), meta
 
 
 def vectorise_png(
@@ -159,7 +171,7 @@ def vectorise_png(
     filter_speckle: int = 4,
     color_precision: int = 6,
     max_colors: int = 6,
-) -> str:
+) -> Tuple[str, dict]:
     """Trace a raster image into a clean, scalable SVG.
 
     Sits between background removal and stitch generation: the extracted design
@@ -168,6 +180,10 @@ def vectorise_png(
     and gives the user a reusable vector file for other applications.
 
     Transparent pixels stay transparent, so an extracted logo keeps its cut-out.
+
+    Returns ``(svg, meta)`` where ``meta`` reports the palette: ``suggested`` (the
+    natural number of distinct contrasting colours in the image), ``used`` (how
+    many were kept, capped by ``max_colors``) and ``colors`` (their hexes).
 
     Parameters
     ----------
@@ -184,14 +200,15 @@ def vectorise_png(
     img.load()
     img = img.convert("RGBA")
 
-    # Reduce step: collapse to a few solid thread colours before tracing.
+    # Reduce step: collapse to the most contrasting solid colours before tracing.
+    meta = {"suggested": 0, "used": 0, "colors": []}
     if max_colors and max_colors > 0:
-        img = _flatten_palette(img, int(min(64, max_colors)))
+        img, meta = _flatten_palette(img, int(min(64, max_colors)))
 
     buf = io.BytesIO()
     img.save(buf, "PNG")
 
-    return vtracer.convert_raw_image_to_svg(
+    svg = vtracer.convert_raw_image_to_svg(
         buf.getvalue(),
         img_format="png",
         colormode="color",
@@ -200,6 +217,7 @@ def vectorise_png(
         filter_speckle=int(max(0, min(64, filter_speckle))),
         color_precision=int(max(1, min(8, color_precision))),
     )
+    return svg, meta
 
 
 # --------------------------------------------------------------------------- #
