@@ -53,9 +53,17 @@ WORKING_PX_PER_MM = 5.0
 # --------------------------------------------------------------------------- #
 # Vectorise (raster -> clean SVG)
 # --------------------------------------------------------------------------- #
-# Perceptual separation (CIE76 ΔE in Lab) below which two colours aren't worth a
-# separate thread — the palette auto-stops once seeds get this close together.
-_MIN_LAB_SEP = 12.0
+# Lightness is weighted below chroma when judging "is this a different colour?"
+# A logo's burgundy→pink glow is one thread even though its lightness swings a
+# lot, whereas different hues (blue vs yellow) must stay apart — so we care more
+# about hue/chroma (a*, b*) than lightness (L*).
+_L_WEIGHT = 0.5
+
+# Separation (in the L-weighted Lab metric) below which two colours aren't worth
+# a separate thread. Sits in the gap between same-hue shades (~<28) and distinct
+# hues (~>40): the palette auto-stops once seeds get this close together, and
+# same-hue shades collapse onto one thread.
+_MIN_LAB_SEP = 30.0
 
 # Most contrasting colours we'll ever propose for one design (matches the UI's
 # thread-count cap). The palette search runs up to here, then auto-stops.
@@ -116,6 +124,7 @@ def _flatten_palette(img: Image.Image, max_colors: int) -> Image.Image:
     np.add.at(cand, inv, pix)
     cand /= counts[:, None]
     cand_lab = _srgb_to_lab(cand)
+    cand_lab[:, 0] *= _L_WEIGHT              # weight hue/chroma above lightness
 
     # Colours too rare to be intentional shouldn't be picked as a seed, but a
     # design with only a few flat colours must still seed — so relax the floor if
@@ -149,6 +158,7 @@ def _flatten_palette(img: Image.Image, max_colors: int) -> Image.Image:
 
     # Map each opaque pixel to its nearest seed (streamed over K to bound memory).
     pix_lab = _srgb_to_lab(pix)
+    pix_lab[:, 0] *= _L_WEIGHT               # same metric as seed selection
     best = np.full(pix.shape[0], np.inf)
     nearest = np.zeros(pix.shape[0], dtype=np.int64)
     for i, pl in enumerate(palette_lab):
@@ -163,6 +173,28 @@ def _flatten_palette(img: Image.Image, max_colors: int) -> Image.Image:
     hexes = ["#%02X%02X%02X" % tuple(int(v) for v in c) for c in palette_rgb]
     meta = {"suggested": suggested, "used": used, "colors": hexes}
     return Image.fromarray(result, "RGBA"), meta
+
+
+def simplify_png(png_bytes: bytes, *, max_colors: int = 6) -> Tuple[bytes, dict]:
+    """Reduce a raster to its most contrasting solid colours, staying a raster.
+
+    Same palette engine as the vectorise step (:func:`_flatten_palette`) but
+    without tracing — for the "extract logo" path, which sometimes reads better
+    as pixels than as smooth vector shapes. Returns ``(png_bytes, meta)`` with the
+    same ``suggested`` / ``used`` / ``colors`` palette summary as vectorise, so the
+    UI can recommend a thread count here too.
+    """
+    img = Image.open(io.BytesIO(png_bytes))
+    img.load()
+    img = img.convert("RGBA")
+
+    meta = {"suggested": 0, "used": 0, "colors": []}
+    if max_colors and max_colors > 0:
+        img, meta = _flatten_palette(img, int(min(64, max_colors)))
+
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue(), meta
 
 
 def vectorise_png(

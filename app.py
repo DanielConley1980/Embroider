@@ -28,8 +28,10 @@ from flask import (
 )
 from PIL import Image
 
+import base64
+
 from converter import (
-    ConvertOptions, convert_image, write_pattern, vectorise_png,
+    ConvertOptions, convert_image, write_pattern, vectorise_png, simplify_png,
     SUPPORTED_FORMATS,
 )
 
@@ -182,6 +184,38 @@ def vectorise():
         return jsonify({"error": f"Vectorise failed: {exc}"}), 500
 
     return jsonify({"svg": svg, **meta})
+
+
+@app.route("/simplify", methods=["POST"])
+def simplify():
+    """Reduce an extracted design to its most contrasting solid colours (raster).
+
+    The non-vectorising counterpart to /vectorise: same palette + suggestion, but
+    returns a flattened PNG so the extract-logo path keeps its raster look while
+    dropping duplicate near-identical threads.
+    """
+    if "photo" not in request.files or request.files["photo"].filename == "":
+        return jsonify({"error": "No image supplied."}), 400
+
+    raw = request.files["photo"].read()
+    try:
+        Image.open(io.BytesIO(raw)).load()
+    except Exception:
+        return jsonify({"error": "Could not read that image."}), 400
+
+    def num(name, default, cast):
+        try:
+            return cast(request.form.get(name, default))
+        except (TypeError, ValueError):
+            return default
+
+    try:
+        png, meta = simplify_png(raw, max_colors=num("max_colors", 6, int))
+    except Exception as exc:  # pragma: no cover - defensive
+        return jsonify({"error": f"Simplify failed: {exc}"}), 500
+
+    data_url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+    return jsonify({"png": data_url, **meta})
 
 
 @app.route("/preview/<job>")

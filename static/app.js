@@ -9,6 +9,7 @@
   // ---------------- state ----------------
   let baseImage = null;      // source canvas (photo or sample); null = text-only
   let baseProcessed = null;  // base after background removal (or null)
+  let baseSimplified = null; // extract path: palette-reduced raster (or null)
   let vectorSvg = null;      // last vectorised SVG text (for download)
   let vectorRaster = null;   // canvas rasterised from the SVG (preview + export)
   let vectorSeq = 0;         // race guard: only the newest vectorise wins
@@ -174,12 +175,32 @@
     } else {
       baseProcessed = null;
     }
-    updateVector();   // re-vectorise (if enabled) off the fresh base, then render
+    refreshProcessed();   // re-run the active palette path off the fresh base
+  }
+
+  // Decide which server-side palette step to run for the current settings:
+  // vectorise (trace) wins; else extract-logo gets the raster simplify; else none.
+  function refreshProcessed() {
+    const hasBase = !!(baseProcessed || baseImage);
+    if ($("vectorise").checked && hasBase) {
+      baseSimplified = null;
+      updateVector();
+    } else if ($("removeBg").checked && hasBase) {
+      vectorSvg = null; vectorRaster = null;
+      $("vecActions").hidden = true; $("vecStatus").textContent = "";
+      updateSimplify();
+    } else {
+      vectorSvg = null; vectorRaster = null; baseSimplified = null;
+      vectorSuggested = null; vectorSeq++;
+      $("vecActions").hidden = true; $("vecStatus").textContent = "";
+      updateColorAdvice();
+      render();
+    }
   }
 
   // ---------------- vectorise (raster -> clean SVG) ----------------
-  $("vectorise").addEventListener("change", () => { $("vecWrap").hidden = !$("vectorise").checked; updateVector(); });
-  $("vecDetail").addEventListener("input", () => { $("vecDetailVal").textContent = $("vecDetail").value; updateVector(); });
+  $("vectorise").addEventListener("change", () => { $("vecWrap").hidden = !$("vectorise").checked; refreshProcessed(); });
+  $("vecDetail").addEventListener("input", () => { $("vecDetailVal").textContent = $("vecDetail").value; refreshProcessed(); });
   $("vecDownload").addEventListener("click", () => {
     if (!vectorSvg) return;
     const blob = new Blob([vectorSvg], { type: "image/svg+xml" });
@@ -254,6 +275,51 @@
             img.src = url;
           })
           .catch((err) => { if (seq === vectorSeq) $("vecStatus").textContent = err.message; });
+      }, "image/png");
+    }, 300);
+  }
+
+  // Extract-logo path: palette-reduce the raster (no tracing) + suggest a count.
+  function updateSimplify() {
+    const source = baseProcessed || baseImage;
+    if (!source) { baseSimplified = null; render(); return; }
+    render();                            // show the current base while we reduce
+    const seq = ++vectorSeq;
+    clearTimeout(vectorTimer);
+    vectorTimer = setTimeout(() => {
+      source.toBlob((blob) => {
+        if (!blob) return;
+        const sent = +$("colors").value;
+        const fd = new FormData();
+        fd.append("photo", blob, "design.png");
+        fd.append("max_colors", sent);
+        fetch("/simplify", { method: "POST", body: fd })
+          .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+          .then(({ ok, d }) => {
+            if (seq !== vectorSeq) return;         // superseded by a newer run
+            if (!ok) throw new Error(d.error || "Simplify failed.");
+            vectorSuggested = (d.suggested > 0) ? d.suggested : null;
+            if (vectorSuggested && !colorsUserSet) {
+              const slider = $("colors");
+              const want = clamp(vectorSuggested, +slider.min, +slider.max);
+              if (+slider.value !== want) { slider.value = want; $("colorsVal").textContent = want; }
+              if (want > sent) { updateColorAdvice(); updateSimplify(); return; }
+            }
+            updateColorAdvice();
+            const img = new Image();
+            img.onload = () => {
+              if (seq !== vectorSeq) return;
+              const c = document.createElement("canvas");
+              c.width = img.naturalWidth || source.width;
+              c.height = img.naturalHeight || source.height;
+              c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+              baseSimplified = c;
+              render();
+            };
+            img.onerror = () => {};
+            img.src = d.png;                    // data: URL
+          })
+          .catch(() => {});
       }, "image/png");
     }, 300);
   }
@@ -409,7 +475,7 @@
     design.width = W; design.height = H;
     const ctx = design.getContext("2d");
     ctx.clearRect(0, 0, W, H);
-    const src = vectorRaster || baseProcessed || baseImage;
+    const src = vectorRaster || baseSimplified || baseProcessed || baseImage;
     if (src) {
       ctx.drawImage(src, 0, 0, W, H);
     } else {
@@ -502,7 +568,7 @@
     if (lastJob) refreshDownloads();
   });
   $("hoop").addEventListener("input", () => $("hoopVal").textContent = $("hoop").value + " mm");
-  $("colors").addEventListener("input", () => { colorsUserSet = true; $("colorsVal").textContent = $("colors").value; updateColorAdvice(); updateVector(); });
+  $("colors").addEventListener("input", () => { colorsUserSet = true; $("colorsVal").textContent = $("colors").value; updateColorAdvice(); refreshProcessed(); });
 
   // ---------------- convert ----------------
   function exportCanvas() {
@@ -510,7 +576,7 @@
     const out = document.createElement("canvas"); out.width = W; out.height = H;
     const ctx = out.getContext("2d");
     ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H); // flatten transparency onto white
-    const src = vectorRaster || baseProcessed || baseImage;
+    const src = vectorRaster || baseSimplified || baseProcessed || baseImage;
     if (src) ctx.drawImage(src, 0, 0, W, H);
     drawText(ctx, W, H);
     return out;
