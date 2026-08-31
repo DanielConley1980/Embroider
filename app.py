@@ -29,7 +29,8 @@ from flask import (
 from PIL import Image
 
 from converter import (
-    ConvertOptions, convert_image, write_pattern, SUPPORTED_FORMATS,
+    ConvertOptions, convert_image, write_pattern, vectorise_png,
+    SUPPORTED_FORMATS,
 )
 
 app = Flask(__name__)
@@ -145,6 +146,41 @@ def convert():
             "segments": result.anim_segments,
         },
     })
+
+
+@app.route("/vectorise", methods=["POST"])
+def vectorise():
+    """Retrace an extracted design into a clean SVG for the preview + download.
+
+    Intermediary step: the client sends the background-removed design, we trace
+    it into tidy vector shapes and hand the SVG back. The client rasterises it
+    into the hoop preview and offers it as a downloadable .svg file.
+    """
+    if "photo" not in request.files or request.files["photo"].filename == "":
+        return jsonify({"error": "No image supplied."}), 400
+
+    raw = request.files["photo"].read()
+    try:
+        Image.open(io.BytesIO(raw)).load()
+    except Exception:
+        return jsonify({"error": "Could not read that image."}), 400
+
+    def num(name, default, cast):
+        try:
+            return cast(request.form.get(name, default))
+        except (TypeError, ValueError):
+            return default
+
+    try:
+        svg = vectorise_png(
+            raw,
+            filter_speckle=num("filter_speckle", 4, int),
+            color_precision=num("color_precision", 6, int),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        return jsonify({"error": f"Vectorise failed: {exc}"}), 500
+
+    return jsonify({"svg": svg})
 
 
 @app.route("/preview/<job>")

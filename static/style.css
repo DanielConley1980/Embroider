@@ -233,6 +233,13 @@ select {
 .stitch-btn:disabled { opacity: .5; cursor: not-allowed; }
 .hint { color: var(--muted); font-size: .8rem; margin: .8rem 0 0; }
 
+.ghost-btn {
+  padding: .5rem .8rem; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel-2); color: var(--thread); font: inherit; font-size: .85rem;
+  font-weight: 600; cursor: pointer; transition: border-color .15s, background .15s;
+}
+.ghost-btn:hover { border-color: var(--thread); background: color-mix(in srgb, var(--thread) 8%, var(--panel-2)); }
+
 /* ---- hoop / preview ---- */
 .stage { display: flex; flex-direction: column; gap: 1.1rem; }
 .hoop-wrap {

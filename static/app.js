@@ -9,6 +9,10 @@
   // ---------------- state ----------------
   let baseImage = null;      // source canvas (photo or sample); null = text-only
   let baseProcessed = null;  // base after background removal (or null)
+  let vectorSvg = null;      // last vectorised SVG text (for download)
+  let vectorRaster = null;   // canvas rasterised from the SVG (preview + export)
+  let vectorSeq = 0;         // race guard: only the newest vectorise wins
+  let vectorTimer = null;    // debounce handle for the vectorise fetch
   let format = "pes";
   let lastJob = null, availableFormats = [];
   const text = { value: "", family: "Poppins", size: 28, color: "#1b2724", weight: 400, x: 0.5, y: 0.5,
@@ -166,7 +170,70 @@
     } else {
       baseProcessed = null;
     }
-    render();
+    updateVector();   // re-vectorise (if enabled) off the fresh base, then render
+  }
+
+  // ---------------- vectorise (raster -> clean SVG) ----------------
+  $("vectorise").addEventListener("change", () => { $("vecWrap").hidden = !$("vectorise").checked; updateVector(); });
+  $("vecDetail").addEventListener("input", () => { $("vecDetailVal").textContent = $("vecDetail").value; updateVector(); });
+  $("vecDownload").addEventListener("click", () => {
+    if (!vectorSvg) return;
+    const blob = new Blob([vectorSvg], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "stitchforge-design.svg";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
+  function updateVector() {
+    const on = $("vectorise").checked;
+    const source = baseProcessed || baseImage;
+    // Off, or nothing to trace: drop any vector state and show the plain base.
+    if (!on || !source) {
+      vectorSvg = null; vectorRaster = null;
+      vectorSeq++;                       // cancel any in-flight result
+      $("vecActions").hidden = true;
+      $("vecStatus").textContent = "";
+      render();
+      return;
+    }
+    render();                            // show the current base while we trace
+    const seq = ++vectorSeq;
+    $("vecStatus").textContent = "Vectorising…";
+    clearTimeout(vectorTimer);
+    vectorTimer = setTimeout(() => {
+      source.toBlob((blob) => {
+        if (!blob) { if (seq === vectorSeq) $("vecStatus").textContent = "Vectorise failed."; return; }
+        const fd = new FormData();
+        fd.append("photo", blob, "design.png");
+        fd.append("filter_speckle", $("vecDetail").value);
+        fetch("/vectorise", { method: "POST", body: fd })
+          .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+          .then(({ ok, d }) => {
+            if (seq !== vectorSeq) return;         // superseded by a newer run
+            if (!ok) throw new Error(d.error || "Vectorise failed.");
+            vectorSvg = d.svg;
+            const img = new Image();
+            const url = URL.createObjectURL(new Blob([d.svg], { type: "image/svg+xml" }));
+            img.onload = () => {
+              URL.revokeObjectURL(url);
+              if (seq !== vectorSeq) return;
+              const c = document.createElement("canvas");
+              c.width = img.naturalWidth || source.width;
+              c.height = img.naturalHeight || source.height;
+              c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+              vectorRaster = c;
+              $("vecStatus").textContent = "Clean vector ready.";
+              $("vecActions").hidden = false;
+              render();
+            };
+            img.onerror = () => { URL.revokeObjectURL(url); if (seq === vectorSeq) $("vecStatus").textContent = "Could not render the vector."; };
+            img.src = url;
+          })
+          .catch((err) => { if (seq === vectorSeq) $("vecStatus").textContent = err.message; });
+      }, "image/png");
+    }, 300);
   }
 
   // ---------------- fonts (scrollable preview picker) ----------------
@@ -320,7 +387,7 @@
     design.width = W; design.height = H;
     const ctx = design.getContext("2d");
     ctx.clearRect(0, 0, W, H);
-    const src = baseProcessed || baseImage;
+    const src = vectorRaster || baseProcessed || baseImage;
     if (src) {
       ctx.drawImage(src, 0, 0, W, H);
     } else {
@@ -391,7 +458,7 @@
     const out = document.createElement("canvas"); out.width = W; out.height = H;
     const ctx = out.getContext("2d");
     ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H); // flatten transparency onto white
-    const src = baseProcessed || baseImage;
+    const src = vectorRaster || baseProcessed || baseImage;
     if (src) ctx.drawImage(src, 0, 0, W, H);
     drawText(ctx, W, H);
     return out;

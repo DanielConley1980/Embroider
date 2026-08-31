@@ -51,6 +51,49 @@ WORKING_PX_PER_MM = 5.0
 
 
 # --------------------------------------------------------------------------- #
+# Vectorise (raster -> clean SVG)
+# --------------------------------------------------------------------------- #
+def vectorise_png(
+    png_bytes: bytes,
+    *,
+    filter_speckle: int = 4,
+    color_precision: int = 6,
+) -> str:
+    """Trace a raster image into a clean, scalable SVG.
+
+    Sits between background removal and stitch generation: the extracted design
+    (a PNG, alpha preserved) is retraced into smooth vector shapes, which tidies
+    away jagged/anti-aliased edges and speckle before we fill it with stitches,
+    and gives the user a reusable vector file for other applications.
+
+    Transparent pixels stay transparent, so an extracted logo keeps its cut-out.
+
+    Parameters
+    ----------
+    filter_speckle : drop shapes smaller than this many pixels (higher = tidier).
+    color_precision : bits of colour kept (higher = more shades preserved).
+    """
+    import vtracer  # local import: keeps the stitch path free of the trace dep
+
+    # Normalise: re-encode to RGBA PNG so vtracer always gets a format it groks
+    # and transparency is preserved regardless of what the caller uploaded.
+    img = Image.open(io.BytesIO(png_bytes))
+    img.load()
+    buf = io.BytesIO()
+    img.convert("RGBA").save(buf, "PNG")
+
+    return vtracer.convert_raw_image_to_svg(
+        buf.getvalue(),
+        img_format="png",
+        colormode="color",
+        hierarchical="stacked",   # stacked shapes preserve the transparent cut-out
+        mode="spline",            # smooth Bezier curves rather than jagged polygons
+        filter_speckle=int(max(0, min(64, filter_speckle))),
+        color_precision=int(max(1, min(8, color_precision))),
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Options + result containers
 # --------------------------------------------------------------------------- #
 @dataclass
