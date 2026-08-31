@@ -53,11 +53,38 @@ WORKING_PX_PER_MM = 5.0
 # --------------------------------------------------------------------------- #
 # Vectorise (raster -> clean SVG)
 # --------------------------------------------------------------------------- #
+def _flatten_palette(img: Image.Image, max_colors: int) -> Image.Image:
+    """Reduce an RGBA image to at most ``max_colors`` solid colours, keeping alpha.
+
+    This is the palette-reduce step applied to the vector: without it a photo of a
+    logo carries dozens of near-identical shades (anti-aliasing, JPEG noise,
+    lighting) and each would trace to its own colour — so a single burgundy would
+    become four "threads". Collapsing to a few solid colours means one thread per
+    colour, and no needless colour changes on the machine.
+
+    Fully transparent pixels are parked on a sentinel slot so they don't spend a
+    palette entry, then made transparent again; partial edge alpha is preserved.
+    """
+    img = img.convert("RGBA")
+    alpha = img.getchannel("A")
+    opaque = alpha.point(lambda v: 255 if v > 0 else 0)
+
+    # Park transparent pixels on black so they cluster into one slot; give the
+    # visible colours the remaining ``max_colors`` entries.
+    sentinel = Image.new("RGB", img.size, (0, 0, 0))
+    rgb = Image.composite(img.convert("RGB"), sentinel, opaque)
+    quant = rgb.quantize(colors=max_colors + 1, method=Image.MEDIANCUT,
+                         dither=Image.NONE).convert("RGB")
+    quant.putalpha(alpha)
+    return quant
+
+
 def vectorise_png(
     png_bytes: bytes,
     *,
     filter_speckle: int = 4,
     color_precision: int = 6,
+    max_colors: int = 6,
 ) -> str:
     """Trace a raster image into a clean, scalable SVG.
 
@@ -72,6 +99,8 @@ def vectorise_png(
     ----------
     filter_speckle : drop shapes smaller than this many pixels (higher = tidier).
     color_precision : bits of colour kept (higher = more shades preserved).
+    max_colors : flatten to at most this many solid colours first, so each colour
+        traces to a single thread (<= 0 keeps the full palette).
     """
     import vtracer  # local import: keeps the stitch path free of the trace dep
 
@@ -79,8 +108,14 @@ def vectorise_png(
     # and transparency is preserved regardless of what the caller uploaded.
     img = Image.open(io.BytesIO(png_bytes))
     img.load()
+    img = img.convert("RGBA")
+
+    # Reduce step: collapse to a few solid thread colours before tracing.
+    if max_colors and max_colors > 0:
+        img = _flatten_palette(img, int(min(64, max_colors)))
+
     buf = io.BytesIO()
-    img.convert("RGBA").save(buf, "PNG")
+    img.save(buf, "PNG")
 
     return vtracer.convert_raw_image_to_svg(
         buf.getvalue(),

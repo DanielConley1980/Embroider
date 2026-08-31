@@ -208,6 +208,7 @@
         const fd = new FormData();
         fd.append("photo", blob, "design.png");
         fd.append("filter_speckle", $("vecDetail").value);
+        fd.append("max_colors", $("colors").value);   // reduce to the thread-colour count
         fetch("/vectorise", { method: "POST", body: fd })
           .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
           .then(({ ok, d }) => {
@@ -470,7 +471,7 @@
     if (lastJob) refreshDownloads();
   });
   $("hoop").addEventListener("input", () => $("hoopVal").textContent = $("hoop").value + " mm");
-  $("colors").addEventListener("input", () => { $("colorsVal").textContent = $("colors").value; updateColorAdvice(); });
+  $("colors").addEventListener("input", () => { $("colorsVal").textContent = $("colors").value; updateColorAdvice(); updateVector(); });
 
   // ---------------- convert ----------------
   function exportCanvas() {

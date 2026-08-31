@@ -176,6 +176,7 @@ def vectorise():
             raw,
             filter_speckle=num("filter_speckle", 4, int),
             color_precision=num("color_precision", 6, int),
+            max_colors=num("max_colors", 6, int),
         )
     except Exception as exc:  # pragma: no cover - defensive
         return jsonify({"error": f"Vectorise failed: {exc}"}), 500
