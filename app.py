@@ -31,7 +31,7 @@ from PIL import Image
 import base64
 
 from converter import (
-    ConvertOptions, convert_image, write_pattern, vectorise_png, simplify_png,
+    ConvertOptions, convert_image, write_pattern, vectorise_png, reduce_image,
     SUPPORTED_FORMATS,
 )
 
@@ -150,13 +150,14 @@ def convert():
     })
 
 
-@app.route("/vectorise", methods=["POST"])
-def vectorise():
-    """Retrace an extracted design into a clean SVG for the preview + download.
+@app.route("/process", methods=["POST"])
+def process():
+    """The reduce step (+ optional vectorise), the heart of the live preview.
 
-    Intermediary step: the client sends the background-removed design, we trace
-    it into tidy vector shapes and hand the SVG back. The client rasterises it
-    into the hoop preview and offers it as a downloadable .svg file.
+    Rebuilds the uploaded design from the fewest threads that keep its essence
+    (the "reduce palette" step), and — when asked — smooths that result into a
+    vector. Returns the reduced PNG (data URL), an optional SVG, and the palette
+    summary (suggested / used / colors) so the UI can advise a thread count.
     """
     if "photo" not in request.files or request.files["photo"].filename == "":
         return jsonify({"error": "No image supplied."}), 400
@@ -174,48 +175,27 @@ def vectorise():
             return default
 
     try:
-        svg, meta = vectorise_png(
+        reduced, meta = reduce_image(
             raw,
-            filter_speckle=num("filter_speckle", 4, int),
-            color_precision=num("color_precision", 6, int),
-            max_colors=num("max_colors", 6, int),
+            max_colors=num("max_colors", 8, int),
+            min_sep=num("strength", 30.0, float),
         )
+        buf = io.BytesIO()
+        reduced.save(buf, "PNG")
+        reduced_png = buf.getvalue()
+
+        svg = None
+        if request.form.get("vectorise", "false") == "true":
+            svg, _ = vectorise_png(
+                reduced_png,
+                filter_speckle=num("filter_speckle", 4, int),
+                max_colors=0,   # already reduced above; just smooth into vectors
+            )
     except Exception as exc:  # pragma: no cover - defensive
-        return jsonify({"error": f"Vectorise failed: {exc}"}), 500
+        return jsonify({"error": f"Processing failed: {exc}"}), 500
 
-    return jsonify({"svg": svg, **meta})
-
-
-@app.route("/simplify", methods=["POST"])
-def simplify():
-    """Reduce an extracted design to its most contrasting solid colours (raster).
-
-    The non-vectorising counterpart to /vectorise: same palette + suggestion, but
-    returns a flattened PNG so the extract-logo path keeps its raster look while
-    dropping duplicate near-identical threads.
-    """
-    if "photo" not in request.files or request.files["photo"].filename == "":
-        return jsonify({"error": "No image supplied."}), 400
-
-    raw = request.files["photo"].read()
-    try:
-        Image.open(io.BytesIO(raw)).load()
-    except Exception:
-        return jsonify({"error": "Could not read that image."}), 400
-
-    def num(name, default, cast):
-        try:
-            return cast(request.form.get(name, default))
-        except (TypeError, ValueError):
-            return default
-
-    try:
-        png, meta = simplify_png(raw, max_colors=num("max_colors", 6, int))
-    except Exception as exc:  # pragma: no cover - defensive
-        return jsonify({"error": f"Simplify failed: {exc}"}), 500
-
-    data_url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
-    return jsonify({"png": data_url, **meta})
+    data_url = "data:image/png;base64," + base64.b64encode(reduced_png).decode("ascii")
+    return jsonify({"png": data_url, "svg": svg, **meta})
 
 
 @app.route("/preview/<job>")

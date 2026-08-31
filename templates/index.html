@@ -49,17 +49,29 @@
             plain or solid backgrounds.</p>
         </div>
 
+        <p class="eyebrow mt">Reduce palette</p>
+        <div class="reduce-lead">Rebuilds your image from the fewest threads that
+          keep its character — the most contrasting colours, one thread each.
+          Everything downstream builds on this.</div>
+        <div class="ctl">
+          <label for="reduceStrength">Reduce strength
+            <span class="val" id="reduceStrengthVal">Balanced</span></label>
+          <input type="range" id="reduceStrength" min="12" max="60" step="2" value="30">
+          <p class="subtle">Lower keeps subtle shade differences; higher suppresses
+            near-identical colours and merges them into one thread.</p>
+          <div class="palette" id="palette" aria-hidden="true"></div>
+          <p class="advice"><span id="reduceCount"></span> <span id="reduceStatus" aria-live="polite"></span></p>
+        </div>
+
         <p class="eyebrow mt">Vectorise</p>
         <div class="checks" style="margin-top:0">
-          <label><input type="checkbox" id="vectorise"> Vectorise — tidy into clean vector shapes</label>
+          <label><input type="checkbox" id="vectorise"> Vectorise — smooth the reduced design into clean vector shapes</label>
         </div>
         <div class="ctl" id="vecWrap" hidden>
           <label for="vecDetail">Smoothing <span class="val" id="vecDetailVal">4</span></label>
           <input type="range" id="vecDetail" min="0" max="20" step="1" value="4">
-          <p class="subtle">Retraces the design into smooth, scalable shapes and
-            keeps the most contrasting colours — up to your <b>Thread colours</b>
-            count — so each stays vivid and traces to a single thread. Higher
-            smoothing drops small specks for a tidier logo.</p>
+          <p class="subtle">Traces the reduced design into smooth, scalable shapes.
+            Higher smoothing drops small specks for a tidier logo.</p>
           <p class="advice" id="vecStatus" aria-live="polite"></p>
           <div id="vecActions" hidden style="margin-top:.5rem">
             <button type="button" class="ghost-btn" id="vecDownload">Download vector (SVG)</button>
@@ -170,14 +182,14 @@
         </div>
 
         <div class="card compare-card" id="compareCard" hidden>
-          <p class="eyebrow">Vectorise — before &amp; after</p>
+          <p class="eyebrow">Before &amp; after</p>
           <div class="compare">
             <div class="cmp-col">
-              <span class="cmp-label">Before — extracted</span>
+              <span class="cmp-label">Before — original</span>
               <div class="cmp-frame"><canvas id="cmpBefore"></canvas></div>
             </div>
             <div class="cmp-col">
-              <span class="cmp-label">After — clean vector</span>
+              <span class="cmp-label">After — reduced</span>
               <div class="cmp-frame"><canvas id="cmpAfter"></canvas></div>
             </div>
           </div>
@@ -206,8 +218,8 @@
 
     <div class="how">
       <div class="step"><div class="n">01</div><h3>Design</h3><p>Photo, shape or text — remove the background if you like.</p></div>
-      <div class="step"><div class="n">02</div><h3>Vectorise</h3><p>Optionally retrace the design into clean, smooth vector shapes.</p></div>
-      <div class="step"><div class="n">03</div><h3>Reduce</h3><p>Similar shades merge into a handful of real thread colours — one thread each, no needless colour changes.</p></div>
+      <div class="step"><div class="n">02</div><h3>Reduce</h3><p>The heart of it — rebuilt from the fewest, most contrasting threads that keep its essence.</p></div>
+      <div class="step"><div class="n">03</div><h3>Vectorise</h3><p>Optionally smooth the reduced design into clean, scalable shapes.</p></div>
       <div class="step"><div class="n">04</div><h3>Fill</h3><p>Each colour region is filled with back-and-forth stitch rows.</p></div>
       <div class="step"><div class="n">05</div><h3>Write</h3><p>The path is exported to your machine's file format.</p></div>
     </div>

@@ -85,7 +85,8 @@ def _srgb_to_lab(rgb: np.ndarray) -> np.ndarray:
                      200 * (f[:, 1] - f[:, 2])], axis=1)
 
 
-def _flatten_palette(img: Image.Image, max_colors: int) -> Image.Image:
+def _flatten_palette(img: Image.Image, max_colors: int,
+                     min_sep: float = _MIN_LAB_SEP) -> Tuple[Image.Image, dict]:
     """Reduce an RGBA image to its most *contrasting* solid colours, keeping alpha.
 
     A logo photo carries dozens of near-identical shades (anti-aliasing, JPEG
@@ -145,7 +146,7 @@ def _flatten_palette(img: Image.Image, max_colors: int) -> Image.Image:
     while len(chosen) < min(_PALETTE_CEILING, counts.size):
         masked = np.where(eligible, dist, -1.0)
         nxt = int(np.argmax(masked))
-        if masked[nxt] < _MIN_LAB_SEP:      # nothing left worth a new thread
+        if masked[nxt] < min_sep:           # nothing left worth a new thread
             break
         chosen.append(nxt)
         dist = np.minimum(dist, np.linalg.norm(cand_lab - cand_lab[nxt], axis=1))
@@ -175,26 +176,29 @@ def _flatten_palette(img: Image.Image, max_colors: int) -> Image.Image:
     return Image.fromarray(result, "RGBA"), meta
 
 
-def simplify_png(png_bytes: bytes, *, max_colors: int = 6) -> Tuple[bytes, dict]:
-    """Reduce a raster to its most contrasting solid colours, staying a raster.
+def reduce_image(png_bytes: bytes, *, max_colors: int = 8,
+                 min_sep: float = _MIN_LAB_SEP) -> Tuple[Image.Image, dict]:
+    """The core "reduce palette" step: rebuild an image from the fewest threads.
 
-    Same palette engine as the vectorise step (:func:`_flatten_palette`) but
-    without tracing — for the "extract logo" path, which sometimes reads better
-    as pixels than as smooth vector shapes. Returns ``(png_bytes, meta)`` with the
-    same ``suggested`` / ``used`` / ``colors`` palette summary as vectorise, so the
-    UI can recommend a thread count here too.
+    This is the app's central move — recreate the design as faithfully as possible
+    with as few threads as possible, keeping its essence — and it feeds every step
+    after it (vectorise, fill, export). Returns ``(image, meta)`` where ``meta``
+    carries the palette summary: ``suggested`` (the natural distinct-colour count
+    at this strength), ``used`` (capped by ``max_colors``) and ``colors`` (hexes).
+
+    Parameters
+    ----------
+    max_colors : hard cap on the number of threads.
+    min_sep : how far apart (in the L-weighted Lab metric) two colours must be to
+        earn separate threads — the "reduce strength". Higher merges more.
     """
     img = Image.open(io.BytesIO(png_bytes))
     img.load()
     img = img.convert("RGBA")
 
-    meta = {"suggested": 0, "used": 0, "colors": []}
     if max_colors and max_colors > 0:
-        img, meta = _flatten_palette(img, int(min(64, max_colors)))
-
-    buf = io.BytesIO()
-    img.save(buf, "PNG")
-    return buf.getvalue(), meta
+        return _flatten_palette(img, int(min(64, max_colors)), min_sep)
+    return img, {"suggested": 0, "used": 0, "colors": []}
 
 
 def vectorise_png(
@@ -202,27 +206,25 @@ def vectorise_png(
     *,
     filter_speckle: int = 4,
     color_precision: int = 6,
-    max_colors: int = 6,
+    max_colors: int = 0,
 ) -> Tuple[str, dict]:
-    """Trace a raster image into a clean, scalable SVG.
+    """Trace a raster image into a clean, scalable SVG (smoothing the shapes).
 
-    Sits between background removal and stitch generation: the extracted design
-    (a PNG, alpha preserved) is retraced into smooth vector shapes, which tidies
-    away jagged/anti-aliased edges and speckle before we fill it with stitches,
-    and gives the user a reusable vector file for other applications.
+    Runs after the reduce step, so by default it traces the image as-is
+    (``max_colors=0``) — smoothing the already-reduced flat colours into vector
+    shapes. Pass a positive ``max_colors`` to also reduce here (standalone use).
 
     Transparent pixels stay transparent, so an extracted logo keeps its cut-out.
 
-    Returns ``(svg, meta)`` where ``meta`` reports the palette: ``suggested`` (the
-    natural number of distinct contrasting colours in the image), ``used`` (how
-    many were kept, capped by ``max_colors``) and ``colors`` (their hexes).
+    Returns ``(svg, meta)``; ``meta`` carries a palette summary only when this call
+    did the reducing (otherwise it's empty and the caller supplies the palette).
 
     Parameters
     ----------
     filter_speckle : drop shapes smaller than this many pixels (higher = tidier).
     color_precision : bits of colour kept (higher = more shades preserved).
-    max_colors : flatten to at most this many solid colours first, so each colour
-        traces to a single thread (<= 0 keeps the full palette).
+    max_colors : if > 0, reduce to this many solid colours before tracing;
+        0 (default) traces the input unchanged (already reduced upstream).
     """
     import vtracer  # local import: keeps the stitch path free of the trace dep
 
@@ -232,7 +234,7 @@ def vectorise_png(
     img.load()
     img = img.convert("RGBA")
 
-    # Reduce step: collapse to the most contrasting solid colours before tracing.
+    # Optional standalone reduce; normally the input is already reduced upstream.
     meta = {"suggested": 0, "used": 0, "colors": []}
     if max_colors and max_colors > 0:
         img, meta = _flatten_palette(img, int(min(64, max_colors)))

@@ -9,7 +9,7 @@
   // ---------------- state ----------------
   let baseImage = null;      // source canvas (photo or sample); null = text-only
   let baseProcessed = null;  // base after background removal (or null)
-  let baseSimplified = null; // extract path: palette-reduced raster (or null)
+  let reducedRaster = null;  // palette-reduced raster (core step; or null)
   let vectorSvg = null;      // last vectorised SVG text (for download)
   let vectorRaster = null;   // canvas rasterised from the SVG (preview + export)
   let vectorSeq = 0;         // race guard: only the newest vectorise wins
@@ -178,27 +178,8 @@
     refreshProcessed();   // re-run the active palette path off the fresh base
   }
 
-  // Decide which server-side palette step to run for the current settings:
-  // vectorise (trace) wins; else extract-logo gets the raster simplify; else none.
-  function refreshProcessed() {
-    const hasBase = !!(baseProcessed || baseImage);
-    if ($("vectorise").checked && hasBase) {
-      baseSimplified = null;
-      updateVector();
-    } else if ($("removeBg").checked && hasBase) {
-      vectorSvg = null; vectorRaster = null;
-      $("vecActions").hidden = true; $("vecStatus").textContent = "";
-      updateSimplify();
-    } else {
-      vectorSvg = null; vectorRaster = null; baseSimplified = null;
-      vectorSuggested = null; vectorSeq++;
-      $("vecActions").hidden = true; $("vecStatus").textContent = "";
-      updateColorAdvice();
-      render();
-    }
-  }
-
-  // ---------------- vectorise (raster -> clean SVG) ----------------
+  // ---------------- reduce palette (core step) + optional vectorise ----------
+  $("reduceStrength").addEventListener("input", () => { updateStrengthLabel(); refreshProcessed(); });
   $("vectorise").addEventListener("change", () => { $("vecWrap").hidden = !$("vectorise").checked; refreshProcessed(); });
   $("vecDetail").addEventListener("input", () => { $("vecDetailVal").textContent = $("vecDetail").value; refreshProcessed(); });
   $("vecDownload").addEventListener("click", () => {
@@ -211,115 +192,116 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 
+  function updateStrengthLabel() {
+    const v = +$("reduceStrength").value;
+    $("reduceStrengthVal").textContent = v <= 20 ? "Sensitive" : v <= 38 ? "Balanced" : "Aggressive";
+  }
+
+  // Live palette swatches + thread count for the reduce step.
+  function updatePaletteSwatches(colors) {
+    const el = $("palette"); if (el) {
+      el.innerHTML = "";
+      colors.forEach((hex) => {
+        const sw = document.createElement("span");
+        sw.className = "pal-sw"; sw.style.background = hex; sw.title = hex;
+        el.appendChild(sw);
+      });
+    }
+    const cnt = $("reduceCount");
+    if (cnt) cnt.textContent = colors.length ? (colors.length + " thread" + (colors.length === 1 ? "" : "s")) : "";
+  }
+
   // Forget the auto-detected palette when the source image changes, so the next
-  // vectorise re-suggests a thread count for the new design.
+  // reduce re-suggests a thread count for the new design.
   function resetPaletteAdvice() { vectorSuggested = null; colorsUserSet = false; }
 
-  function updateVector() {
-    const on = $("vectorise").checked;
+  // The heart of the preview: reduce the design to its fewest telling threads,
+  // then (optionally) smooth that into vectors. One server round-trip feeds both.
+  function refreshProcessed() {
     const source = baseProcessed || baseImage;
-    // Off, or nothing to trace: drop any vector state and show the plain base.
-    if (!on || !source) {
-      vectorSvg = null; vectorRaster = null; vectorSuggested = null;
-      vectorSeq++;                       // cancel any in-flight result
-      $("vecActions").hidden = true;
-      $("vecStatus").textContent = "";
-      updateColorAdvice();
+    if (!source) {
+      reducedRaster = null; vectorRaster = null; vectorSvg = null; vectorSuggested = null;
+      vectorSeq++;
+      $("vecActions").hidden = true; $("vecStatus").textContent = "";
+      $("reduceStatus").textContent = "";
+      updatePaletteSwatches([]); updateColorAdvice();
       render();
       return;
     }
-    render();                            // show the current base while we trace
+    render();                            // show the current base while we work
     const seq = ++vectorSeq;
-    $("vecStatus").textContent = "Vectorising…";
+    const doVec = $("vectorise").checked;
+    $("reduceStatus").textContent = "Reducing…";
+    if (doVec) $("vecStatus").textContent = "Smoothing…";
     clearTimeout(vectorTimer);
     vectorTimer = setTimeout(() => {
       source.toBlob((blob) => {
-        if (!blob) { if (seq === vectorSeq) $("vecStatus").textContent = "Vectorise failed."; return; }
+        if (!blob) { if (seq === vectorSeq) $("reduceStatus").textContent = "Couldn’t read the image."; return; }
         const sent = +$("colors").value;
         const fd = new FormData();
         fd.append("photo", blob, "design.png");
+        fd.append("max_colors", sent);                 // hard cap on threads
+        fd.append("strength", $("reduceStrength").value); // how aggressively to merge
+        fd.append("vectorise", doVec ? "true" : "false");
         fd.append("filter_speckle", $("vecDetail").value);
-        fd.append("max_colors", sent);   // reduce to the thread-colour count
-        fetch("/vectorise", { method: "POST", body: fd })
+        fetch("/process", { method: "POST", body: fd })
           .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
           .then(({ ok, d }) => {
-            if (seq !== vectorSeq) return;         // superseded by a newer run
-            if (!ok) throw new Error(d.error || "Vectorise failed.");
-            // The trace also tells us the image's natural distinct-colour count.
-            // Adopt it as the thread-count default (unless the user set one), and
-            // re-trace if we'd under-asked so the fuller palette actually renders.
+            if (seq !== vectorSeq) return;             // superseded by a newer run
+            if (!ok) throw new Error(d.error || "Processing failed.");
+            // The reduce tells us the image's natural distinct-colour count at
+            // this strength. Adopt it as the thread default (unless the user set
+            // one), re-running if we'd under-asked so the fuller palette renders.
             vectorSuggested = (d.suggested > 0) ? d.suggested : null;
             if (vectorSuggested && !colorsUserSet) {
               const slider = $("colors");
               const want = clamp(vectorSuggested, +slider.min, +slider.max);
               if (+slider.value !== want) { slider.value = want; $("colorsVal").textContent = want; }
-              if (want > sent) { updateColorAdvice(); updateVector(); return; }
+              if (want > sent) { updateColorAdvice(); refreshProcessed(); return; }
             }
+            updatePaletteSwatches(d.colors || []);
             updateColorAdvice();
-            vectorSvg = d.svg;
-            const img = new Image();
-            const url = URL.createObjectURL(new Blob([d.svg], { type: "image/svg+xml" }));
-            img.onload = () => {
-              URL.revokeObjectURL(url);
-              if (seq !== vectorSeq) return;
-              const c = document.createElement("canvas");
-              c.width = img.naturalWidth || source.width;
-              c.height = img.naturalHeight || source.height;
-              c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-              vectorRaster = c;
-              $("vecStatus").textContent = "Clean vector ready.";
-              $("vecActions").hidden = false;
-              render();
-            };
-            img.onerror = () => { URL.revokeObjectURL(url); if (seq === vectorSeq) $("vecStatus").textContent = "Could not render the vector."; };
-            img.src = url;
-          })
-          .catch((err) => { if (seq === vectorSeq) $("vecStatus").textContent = err.message; });
-      }, "image/png");
-    }, 300);
-  }
+            $("reduceStatus").textContent = "";
 
-  // Extract-logo path: palette-reduce the raster (no tracing) + suggest a count.
-  function updateSimplify() {
-    const source = baseProcessed || baseImage;
-    if (!source) { baseSimplified = null; render(); return; }
-    render();                            // show the current base while we reduce
-    const seq = ++vectorSeq;
-    clearTimeout(vectorTimer);
-    vectorTimer = setTimeout(() => {
-      source.toBlob((blob) => {
-        if (!blob) return;
-        const sent = +$("colors").value;
-        const fd = new FormData();
-        fd.append("photo", blob, "design.png");
-        fd.append("max_colors", sent);
-        fetch("/simplify", { method: "POST", body: fd })
-          .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
-          .then(({ ok, d }) => {
-            if (seq !== vectorSeq) return;         // superseded by a newer run
-            if (!ok) throw new Error(d.error || "Simplify failed.");
-            vectorSuggested = (d.suggested > 0) ? d.suggested : null;
-            if (vectorSuggested && !colorsUserSet) {
-              const slider = $("colors");
-              const want = clamp(vectorSuggested, +slider.min, +slider.max);
-              if (+slider.value !== want) { slider.value = want; $("colorsVal").textContent = want; }
-              if (want > sent) { updateColorAdvice(); updateSimplify(); return; }
-            }
-            updateColorAdvice();
-            const img = new Image();
-            img.onload = () => {
+            // Reduced raster (always) — the base for preview, stitching and export.
+            const rimg = new Image();
+            rimg.onload = () => {
               if (seq !== vectorSeq) return;
               const c = document.createElement("canvas");
-              c.width = img.naturalWidth || source.width;
-              c.height = img.naturalHeight || source.height;
-              c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-              baseSimplified = c;
+              c.width = rimg.naturalWidth || source.width;
+              c.height = rimg.naturalHeight || source.height;
+              c.getContext("2d").drawImage(rimg, 0, 0, c.width, c.height);
+              reducedRaster = c;
               render();
             };
-            img.onerror = () => {};
-            img.src = d.png;                    // data: URL
+            rimg.onerror = () => {};
+            rimg.src = d.png;
+
+            // Vector (optional) — smoothed shapes traced from the reduced result.
+            if (d.svg) {
+              vectorSvg = d.svg;
+              const vimg = new Image();
+              const url = URL.createObjectURL(new Blob([d.svg], { type: "image/svg+xml" }));
+              vimg.onload = () => {
+                URL.revokeObjectURL(url);
+                if (seq !== vectorSeq) return;
+                const c = document.createElement("canvas");
+                c.width = vimg.naturalWidth || source.width;
+                c.height = vimg.naturalHeight || source.height;
+                c.getContext("2d").drawImage(vimg, 0, 0, c.width, c.height);
+                vectorRaster = c;
+                $("vecStatus").textContent = "Smoothed into vectors.";
+                $("vecActions").hidden = false;
+                render();
+              };
+              vimg.onerror = () => { URL.revokeObjectURL(url); if (seq === vectorSeq) $("vecStatus").textContent = "Couldn’t render the vector."; };
+              vimg.src = url;
+            } else {
+              vectorSvg = null; vectorRaster = null;
+              $("vecActions").hidden = true; $("vecStatus").textContent = "";
+            }
           })
-          .catch(() => {});
+          .catch((err) => { if (seq === vectorSeq) $("reduceStatus").textContent = err.message; });
       }, "image/png");
     }, 300);
   }
@@ -475,7 +457,7 @@
     design.width = W; design.height = H;
     const ctx = design.getContext("2d");
     ctx.clearRect(0, 0, W, H);
-    const src = vectorRaster || baseSimplified || baseProcessed || baseImage;
+    const src = vectorRaster || reducedRaster || baseProcessed || baseImage;
     if (src) {
       ctx.drawImage(src, 0, 0, W, H);
     } else {
@@ -490,11 +472,12 @@
     renderCompare();
   }
 
-  // Side-by-side before/after for the vectorise step.
+  // Side-by-side before/after for the reduce (and vectorise) step.
   function renderCompare() {
     const card = $("compareCard");
     const before = baseProcessed || baseImage;
-    if (!$("vectorise").checked || !vectorRaster || !before) { card.hidden = true; return; }
+    const after = vectorRaster || reducedRaster;
+    if (!before || !after) { card.hidden = true; return; }
     card.hidden = false;
     const draw = (cv, src) => {
       const maxW = 320;
@@ -506,7 +489,7 @@
       ctx.drawImage(src, 0, 0, cv.width, cv.height);
     };
     draw($("cmpBefore"), before);
-    draw($("cmpAfter"), vectorRaster);
+    draw($("cmpAfter"), after);
   }
 
   // ---------------- thread-count advice ----------------
@@ -525,9 +508,9 @@
   function updateColorAdvice() {
     const el = $("colorAdvice"); if (!el) return;
     const cur = +$("colors").value;
-    // When we've vectorised, we know the image's actual distinct-colour count —
-    // that's the most appropriate thread count, so lead with it.
-    if ($("vectorise").checked && vectorSuggested) {
+    // Once the reduce step has run, we know the image's actual distinct-colour
+    // count — that's the most appropriate thread count, so lead with it.
+    if (vectorSuggested) {
       const n = vectorSuggested;
       let html = "Best for this image: <b>" + n + "</b> thread colour" + (n === 1 ? "" : "s") +
         " — the distinct colours it actually contains.";
@@ -576,7 +559,7 @@
     const out = document.createElement("canvas"); out.width = W; out.height = H;
     const ctx = out.getContext("2d");
     ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H); // flatten transparency onto white
-    const src = vectorRaster || baseSimplified || baseProcessed || baseImage;
+    const src = vectorRaster || reducedRaster || baseProcessed || baseImage;
     if (src) ctx.drawImage(src, 0, 0, W, H);
     drawText(ctx, W, H);
     return out;
@@ -680,6 +663,7 @@
   }
 
   // ---------------- init ----------------
+  updateStrengthLabel();
   ensureFont(text.family).then(() => {
     $("fontCurrent").style.fontFamily = '"' + text.family + '", sans-serif';
     render();
