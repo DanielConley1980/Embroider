@@ -8,9 +8,10 @@ Pipeline
 1. Load + orient the image, scale it to fit a physical hoop size (in mm).
 2. Optionally smooth it (median filter) to kill JPEG/camera noise.
 3. Reduce it to a small palette of thread colours (adaptive quantisation).
-4. For every colour region, generate a scanline "fill" of stitches
-   (boustrophedon / back-and-forth ordering to minimise travel), with
-   jumps between disconnected runs and a colour-change/trim between threads.
+4. For every colour region, *trace* its contour then fill the interior,
+   region by region (nearest-first), keeping travel on the front as running
+   stitches and trimming any long move — so the back isn't left with long
+   threads that break and unravel.
 5. Emit a pyembroidery ``EmbPattern`` that can be written to real machine
    formats (DST / PES / EXP / JEF / VP3 ...), plus a rendered preview and a
    set of human-readable stats.
@@ -27,6 +28,7 @@ what the user uploaded.
 from __future__ import annotations
 
 import io
+import math
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
@@ -68,6 +70,10 @@ _MIN_LAB_SEP = 30.0
 # Most contrasting colours we'll ever propose for one design (matches the UI's
 # thread-count cap). The palette search runs up to here, then auto-stops.
 _PALETTE_CEILING = 12
+
+# Any needle move longer than this (mm) that can't stay inside the shape is cut
+# with a TRIM, so the back is never left with a long thread that can unravel.
+TRIM_JUMP_MM = 4.0
 
 
 def _srgb_to_lab(rgb: np.ndarray) -> np.ndarray:
@@ -440,46 +446,229 @@ def _runs_in_row(row_mask: np.ndarray):
     return list(zip(starts.tolist(), ends.tolist()))
 
 
-def _fill_color(mask: np.ndarray, px_per_mm: float, opts: ConvertOptions):
-    """
-    Scanline fill for one colour mask.
-    Returns a flat list of ('STITCH'|'JUMP', x_mm, y_mm) tuples.
+def _label_components(mask: np.ndarray):
+    """Label 8-connected components of a boolean mask via run-based union-find.
+
+    Returns a list of components, each a list of (y, x_start, x_end) runs. Working
+    on runs (not pixels) keeps this fast even on large masks.
     """
     h, w = mask.shape
-    row_step = max(1, int(round(opts.row_spacing_mm * px_per_mm)))
-    max_stitch_px = max(1.0, opts.max_stitch_mm * px_per_mm)
-    min_run_px = max(1.0, opts.min_run_mm * px_per_mm)
+    parent: List[int] = []
 
-    out: List[Tuple[str, float, float]] = []
-    flip = False  # boustrophedon toggle
+    def find(x):
+        root = x
+        while parent[root] != root:
+            root = parent[root]
+        while parent[x] != root:
+            parent[x], x = root, parent[x]
+        return root
 
-    def px_to_mm(x, y):
-        return (x / px_per_mm, y / px_per_mm)
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
 
-    for y in range(0, h, row_step):
-        runs = _runs_in_row(mask[y])
-        runs = [(a, b) for (a, b) in runs if (b - a + 1) >= min_run_px]
-        if not runs:
-            continue
-        if flip:
-            runs = list(reversed(runs))
-        flip = not flip
+    rows: List[Tuple[int, list]] = []
+    prev: list = []
+    for y in range(h):
+        cur = []
+        for (a, b) in _runs_in_row(mask[y]):
+            lab = len(parent)
+            parent.append(lab)
+            for (pa, pb, pl) in prev:          # 8-connected: allow 1px diagonal touch
+                if a <= pb + 1 and pa <= b + 1:
+                    union(lab, pl)
+            cur.append((a, b, lab))
+        rows.append((y, cur))
+        prev = cur
 
-        for i, (a, b) in enumerate(runs):
-            # Direction of travel across this run alternates with the row.
-            x0, x1 = (a, b) if not flip else (b, a)
-            # Sample points along the run no more than max_stitch_px apart.
-            length = abs(x1 - x0)
-            n = max(1, int(np.ceil(length / max_stitch_px)))
-            xs = np.linspace(x0, x1, n + 1)
+    comps: dict = {}
+    for (y, cur) in rows:
+        for (a, b, lab) in cur:
+            comps.setdefault(find(lab), []).append((y, a, b))
+    return list(comps.values())
 
-            first_mm = px_to_mm(xs[0], y)
-            # Move to the run start: a jump if we're mid-fill, else first stitch.
-            out.append(("JUMP", first_mm[0], first_mm[1]))
-            for xp in xs:
-                mx, my = px_to_mm(xp, y)
-                out.append(("STITCH", mx, my))
-    return out
+
+def _trace_boundary(cm: np.ndarray):
+    """Moore-neighbour boundary trace of a component. Returns a closed list of
+    (x, y) points following the outer contour, so the shape is *traced* rather
+    than scanned. Guarded against runaway loops; returns [] if it can't trace."""
+    h, w = cm.shape
+    p = np.zeros((h + 2, w + 2), dtype=bool)
+    p[1:-1, 1:-1] = cm
+    nz = np.argwhere(p)
+    if nz.size == 0:
+        return []
+    sy, sx = int(nz[0][0]), int(nz[0][1])       # topmost, then leftmost
+    # 8 neighbours, clockwise: E, SE, S, SW, W, NW, N, NE
+    nbr = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)]
+    start = (sy, sx)
+    contour = [(sx - 1, sy - 1)]
+    cur = start
+    b_dir = 4                                    # came from the west (background)
+    max_iter = 4 * int(cm.sum()) + 64
+    for _ in range(max_iter):
+        found = False
+        for k in range(1, 9):
+            di = (b_dir + k) % 8
+            ny, nx = cur[0] + nbr[di][0], cur[1] + nbr[di][1]
+            if p[ny, nx]:
+                cur = (ny, nx)
+                contour.append((nx - 1, ny - 1))
+                b_dir = (di + 4) % 8             # backtrack toward where we came
+                found = True
+                break
+        if not found:
+            break                                # isolated pixel
+        if cur == start and len(contour) > 2:
+            break
+    return contour
+
+
+def _seg_inside(cm: np.ndarray, ox: int, oy: int, p0, p1) -> bool:
+    """True if the straight travel p0->p1 (full-image px) stays inside component
+    ``cm`` (cropped at origin ox,oy). Used to keep travel on the front as running
+    stitches instead of a loose jump across the back."""
+    x0, y0 = p0
+    x1, y1 = p1
+    steps = int(max(abs(x1 - x0), abs(y1 - y0)))
+    if steps == 0:
+        xi, yi = int(round(x0)) - ox, int(round(y0)) - oy
+        return 0 <= yi < cm.shape[0] and 0 <= xi < cm.shape[1] and cm[yi, xi]
+    for i in range(steps + 1):
+        t = i / steps
+        xi = int(round(x0 + (x1 - x0) * t)) - ox
+        yi = int(round(y0 + (y1 - y0) * t)) - oy
+        if not (0 <= yi < cm.shape[0] and 0 <= xi < cm.shape[1]) or not cm[yi, xi]:
+            return False
+    return True
+
+
+def _fill_color(mask: np.ndarray, px_per_mm: float, opts: ConvertOptions,
+                start_px=None):
+    """Trace-and-fill one colour, contour first then interior — the way a machine
+    follows a shape rather than printing rows.
+
+    For each connected region we stitch its outline (a running-stitch trace),
+    then fill the inside with alternating rows *confined to that region*. Travel
+    between rows/regions is emitted as running stitches whenever it stays inside
+    the shape, falling back to a JUMP only across a genuine gap — so the back
+    isn't littered with long threads that break and unravel. Regions are visited
+    nearest-first to keep travel short.
+
+    Returns (ops, end_px) where ops is a flat list of ('STITCH'|'JUMP', x_mm,
+    y_mm) and end_px is the last needle position (px) for chaining the next colour.
+    """
+    ppm = px_per_mm
+    row_step = max(1, int(round(opts.row_spacing_mm * ppm)))
+    max_stitch_px = max(1.0, opts.max_stitch_mm * ppm)
+    min_run_px = max(1.0, opts.min_run_mm * ppm)
+    outline_px = max(1.0, min(opts.max_stitch_mm, 2.5) * ppm)
+
+    comps = _label_components(mask)
+    # Drop speckle regions too small to be worth stitching.
+    comps = [c for c in comps if sum(b - a + 1 for (_, a, b) in c) >= max(4.0, min_run_px)]
+    ops: List[Tuple[str, float, float]] = []
+    if not comps:
+        return ops, start_px
+
+    def centroid(c):
+        sx = sy = n = 0.0
+        for (y, a, b) in c:
+            cnt = b - a + 1
+            sx += (a + b) / 2.0 * cnt
+            sy += y * cnt
+            n += cnt
+        return (sx / n, sy / n)
+
+    cents = [centroid(c) for c in comps]
+
+    # Visit regions nearest-first from the current needle position.
+    cur = start_px if start_px else (0.0, 0.0)
+    remaining = list(range(len(comps)))
+    order = []
+    while remaining:
+        j = min(remaining, key=lambda i: (cents[i][0] - cur[0]) ** 2 + (cents[i][1] - cur[1]) ** 2)
+        order.append(j)
+        remaining.remove(j)
+        cur = cents[j]
+
+    def emit_stitch(x, y):
+        ops.append(("STITCH", x / ppm, y / ppm))
+
+    def travel_to(dst, cm, ox, oy):
+        """Move from the current point to dst, as running stitches if the path
+        stays inside the region, else a single JUMP."""
+        nonlocal cur
+        if cur is not None and _seg_inside(cm, ox, oy, cur, dst):
+            dist = math.hypot(dst[0] - cur[0], dst[1] - cur[1])
+            n = max(1, int(math.ceil(dist / max_stitch_px)))
+            for t in range(1, n):
+                emit_stitch(cur[0] + (dst[0] - cur[0]) * t / n,
+                            cur[1] + (dst[1] - cur[1]) * t / n)
+        else:
+            ops.append(("JUMP", dst[0] / ppm, dst[1] / ppm))
+
+    cur = start_px
+    for j in order:
+        comp = comps[j]
+        ys = [r[0] for r in comp]
+        y0, y1 = min(ys), max(ys)
+        x0b = min(r[1] for r in comp)
+        x1b = max(r[2] for r in comp)
+        cm = np.zeros((y1 - y0 + 1, x1b - x0b + 1), dtype=bool)
+        for (y, a, b) in comp:
+            cm[y - y0, a - x0b:b - x0b + 1] = True
+
+        # --- trace the outline (running stitch around the shape) ---
+        contour = _trace_boundary(cm)
+        if len(contour) >= 8:
+            pts = [(x + x0b, y + y0) for (x, y) in contour]
+            ops.append(("JUMP", pts[0][0] / ppm, pts[0][1] / ppm))
+            emit_stitch(*pts[0])
+            acc, prev = 0.0, pts[0]
+            for pt in pts[1:]:
+                acc += math.hypot(pt[0] - prev[0], pt[1] - prev[1])
+                if acc >= outline_px:
+                    emit_stitch(*pt)
+                    acc = 0.0
+                prev = pt
+            emit_stitch(*pts[-1])
+            cur = pts[-1]
+
+        # --- fill the interior, confined to this region ---
+        # Rows are followed greedily from the current needle position: for each
+        # row we take the nearest remaining run and enter it from its nearer end.
+        # That serpentines the fill and keeps every hop short, so travel stays on
+        # the front (running stitches) and holes need at most one tiny crossing.
+        for y in range(y0, y1 + 1, row_step):
+            runs = [(a + x0b, b + x0b) for (a, b) in _runs_in_row(cm[y - y0])
+                    if (b - a + 1) >= min_run_px]
+            while runs:
+                if cur is None:
+                    best, (sx, ex) = runs[0], runs[0]
+                else:
+                    best = None
+                    sx = ex = 0
+                    bd = None
+                    for (a, b) in runs:
+                        for e0, e1 in ((a, b), (b, a)):
+                            dd = (e0 - cur[0]) ** 2 + (y - cur[1]) ** 2
+                            if bd is None or dd < bd:
+                                bd, best, sx, ex = dd, (a, b), e0, e1
+                runs.remove(best)
+                if cur is None:
+                    ops.append(("JUMP", sx / ppm, y / ppm))
+                else:
+                    travel_to((sx, y), cm, x0b, y0)
+                emit_stitch(sx, y)
+                length = abs(ex - sx)
+                n = max(1, int(math.ceil(length / max_stitch_px)))
+                for t in range(1, n + 1):
+                    emit_stitch(sx + (ex - sx) * t / n, y)
+                cur = (ex, y)
+
+    return ops, cur
 
 
 def convert_image(img: Image.Image, opts: ConvertOptions,
@@ -505,11 +694,12 @@ def convert_image(img: Image.Image, opts: ConvertOptions,
     order = sorted(order, key=luminance)
 
     first_color = True
+    cur_px = None
     for out_index, ci in enumerate(order):
         mask = labels == ci
         if not mask.any():
             continue
-        stitch_ops = _fill_color(mask, px_per_mm, opts)
+        stitch_ops, cur_px = _fill_color(mask, px_per_mm, opts, start_px=cur_px)
         if not any(op == "STITCH" for op, _, _ in stitch_ops):
             continue
 
@@ -525,13 +715,20 @@ def convert_image(img: Image.Image, opts: ConvertOptions,
         first_color = False
 
         color_stitches = 0
+        last_xy = None
         for op, mx, my in stitch_ops:
             ux, uy = mx * UNITS_PER_MM, my * UNITS_PER_MM
             if op == "JUMP":
+                # Cut the thread before a long move so no loose back thread is
+                # carried across the design (those are what break and unravel).
+                if (last_xy is not None and
+                        math.hypot(mx - last_xy[0], my - last_xy[1]) > TRIM_JUMP_MM):
+                    pattern.add_command(TRIM)
                 pattern.add_stitch_absolute(JUMP, ux, uy)
             else:
                 pattern.add_stitch_absolute(STITCH, ux, uy)
                 color_stitches += 1
+            last_xy = (mx, my)
 
         total_stitches += color_stitches
         threads.append(ThreadInfo(
